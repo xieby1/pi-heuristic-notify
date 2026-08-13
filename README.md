@@ -17,3 +17,13 @@ Pass options when starting Pi:
 Durations may be zero or fractional, but must be finite and non-negative. Invalid configuration reports an error and disables notifications for the session.
 
 To disable the extension entirely, start Pi without loading it or remove it from Pi's configured extensions. There is no separate enable flag.
+
+## Terminal Focus
+
+The extension uses DECSET 1004 focus events to measure continuous time away. Until the terminal reports an authoritative `FocusOut`, focus is unknown and automatic notifications are suppressed.
+
+When running inside tmux, enable focus event forwarding:
+
+```tmux
+set -g focus-events on
+```

@@ -31,8 +31,8 @@ export function createExtensionHarness(options: {
 
   const context = {
     cwd: process.cwd(),
-    mode: "tui",
-    hasUI: true,
+    mode: "print",
+    hasUI: false,
     ui: {
       notify(message: string, type?: "info" | "warning" | "error") {
         notifications.push({ message, type });

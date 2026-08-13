@@ -17,21 +17,21 @@
   - [x] Test exact zero values and fractional seconds
   - [x] Test invalid numbers and urgency values disable notification delivery instead of silently changing behavior
 
-- [ ] Track continuous terminal focus accurately
-  - [ ] Implement a pure scanner for DECSET 1004 `FocusIn` (`ESC [ I`) and `FocusOut` (`ESC [ O`) sequences embedded in terminal input
-  - [ ] Track `focused`, whether any authoritative focus event was observed, and `unfocusedSince`
-  - [ ] Set `unfocusedSince` only on the focused-to-unfocused transition; repeated `FocusOut` events must not reset it
-  - [ ] Clear `unfocusedSince` immediately on `FocusIn`
-  - [ ] Enable focus reporting and subscribe through `ctx.ui.onTerminalInput()` only in TUI mode
-  - [ ] Consume focus sequences while preserving unrelated input in the same chunk
-  - [ ] Disable focus reporting and unsubscribe idempotently on session shutdown
-  - [ ] Suppress automatic notifications when focus state or continuous-away start time is unknown; a current-focus query alone cannot prove continuous absence
-  - [ ] Document that tmux must have `focus-events` enabled for continuous-away tracking
-  - [ ] Test standalone, repeated, mixed, and interleaved focus sequences
-  - [ ] Test that `FocusOut` starts the timer once and `FocusIn` resets it
-  - [ ] Test fresh extension instances do not share focus state
-  - [ ] Test non-TUI sessions write no escape sequences and register no terminal listener
-  - [ ] Test shutdown unsubscribes once, cancels pending work, and emits DECSET 1004 disable once
+- [x] Track continuous terminal focus accurately
+  - [x] Implement a pure scanner for DECSET 1004 `FocusIn` (`ESC [ I`) and `FocusOut` (`ESC [ O`) sequences embedded in terminal input
+  - [x] Track `focused`, whether any authoritative focus event was observed, and `unfocusedSince`
+  - [x] Set `unfocusedSince` only on the focused-to-unfocused transition; repeated `FocusOut` events must not reset it
+  - [x] Clear `unfocusedSince` immediately on `FocusIn`
+  - [x] Enable focus reporting and subscribe through `ctx.ui.onTerminalInput()` only in TUI mode
+  - [x] Consume focus sequences while preserving unrelated input in the same chunk
+  - [x] Disable focus reporting and unsubscribe idempotently on session shutdown
+  - [x] Suppress automatic notifications when focus state or continuous-away start time is unknown; a current-focus query alone cannot prove continuous absence
+  - [x] Document that tmux must have `focus-events` enabled for continuous-away tracking
+  - [x] Test standalone, repeated, mixed, and interleaved focus sequences
+  - [x] Test that `FocusOut` starts the timer once and `FocusIn` resets it
+  - [x] Test fresh extension instances do not share focus state
+  - [x] Test non-TUI sessions write no escape sequences and register no terminal listener
+  - [x] Test shutdown unsubscribes once, cancels pending work, and emits DECSET 1004 disable once
 
 - [ ] Model one fully settled Pi run and apply both heuristic gates
   - [ ] Record the first `agent_start` time in a busy cycle without resetting it for retries or queued follow-ups

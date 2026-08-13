@@ -1,4 +1,51 @@
+import { writeFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+const ESC = "\x1b";
+const ENABLE_FOCUS_REPORTING = `${ESC}[?1004h`;
+const DISABLE_FOCUS_REPORTING = `${ESC}[?1004l`;
+
+export type FocusState = {
+  focused: boolean;
+  observed: boolean;
+  unfocusedSince: number | undefined;
+};
+
+export function createFocusState(): FocusState {
+  return { focused: true, observed: false, unfocusedSince: undefined };
+}
+
+export function scanFocusInput(data: string, state: FocusState, now: number): string | null | undefined {
+  let matched = false;
+  const output = data.replace(/\x1b\[([IO])/g, (_sequence, event: string) => {
+    matched = true;
+    if (event === "I") {
+      state.focused = true;
+      state.observed = true;
+      state.unfocusedSince = undefined;
+    } else {
+      if (!state.observed || state.focused) state.unfocusedSince = now;
+      state.focused = false;
+      state.observed = true;
+    }
+    return "";
+  });
+  return matched ? output || null : undefined;
+}
+
+export function continuousAwayMs(state: FocusState, now: number): number | undefined {
+  return state.observed && !state.focused && state.unfocusedSince !== undefined
+    ? now - state.unfocusedSince
+    : undefined;
+}
+
+function writeTerminal(data: string): void {
+  try {
+    writeFileSync("/dev/tty", data);
+  } catch {
+    process.stdout.write(data);
+  }
+}
 
 export const FLAG_NAMES = {
   minimumRunSeconds: "notify-minimum-run-seconds",
@@ -86,7 +133,14 @@ export function parseConfig(values: Record<string, unknown>): ConfigResult {
   };
 }
 
-export default function heuristicNotify(pi: ExtensionAPI): void {
+export default function heuristicNotify(
+  pi: ExtensionAPI,
+  runtime: { now?: () => number; writeTerminal?: (data: string) => void } = {},
+): void {
+  const now = runtime.now ?? Date.now;
+  const write = runtime.writeTerminal ?? writeTerminal;
+  const focus = createFocusState();
+  let unsubscribeInput: (() => void) | undefined;
   const flags = [
     [FLAG_NAMES.minimumRunSeconds, "Minimum Pi run duration in seconds", "string", "10"],
     [FLAG_NAMES.minimumAwaySeconds, "Minimum continuously unfocused duration in seconds", "string", "5"],
@@ -103,5 +157,21 @@ export default function heuristicNotify(pi: ExtensionAPI): void {
       Object.values(FLAG_NAMES).map((name) => [name, pi.getFlag(name)]),
     ));
     if (!result.ok) ctx.ui.notify(`pi-heuristic-notify disabled: ${result.error}`, "error");
+
+    if (ctx.mode !== "tui" || unsubscribeInput) return;
+    unsubscribeInput = ctx.ui.onTerminalInput((data) => {
+      const output = scanFocusInput(data, focus, now());
+      if (output === undefined) return undefined;
+      return output === null ? { consume: true } : { data: output };
+    });
+    write(ENABLE_FOCUS_REPORTING);
+  });
+
+  pi.on("session_shutdown", () => {
+    if (!unsubscribeInput) return;
+    unsubscribeInput();
+    unsubscribeInput = undefined;
+    write(DISABLE_FOCUS_REPORTING);
+    Object.assign(focus, createFocusState());
   });
 }
