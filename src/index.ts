@@ -135,6 +135,7 @@ export function loadConfig(agentDir = getAgentDir()): ConfigResult {
 export type EligibleRun = {
   prompt: string;
   runDurationMs: number;
+  outcome: "complete" | "failed";
 };
 
 export type NotificationContent = {
@@ -548,7 +549,11 @@ export default function heuristicNotify(
     }
 
     const minimumAwayMs = settledConfig.minimumAwayMs;
-    const candidate = { prompt: settledPrompt, runDurationMs };
+    const candidate: EligibleRun = {
+      prompt: settledPrompt,
+      runDurationMs,
+      outcome: finalStopReason === "error" ? "failed" : "complete",
+    };
     const deliver = () => {
       suppression = "eligible";
       void runtime.onEligible?.(candidate);

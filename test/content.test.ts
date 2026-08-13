@@ -39,7 +39,7 @@ test("formats durations at millisecond, second, and minute boundaries", () => {
 
 test("builds notification content with prompt, duration, urgency, and expiry", () => {
   assert.deepEqual(
-    buildNotification({ prompt: "  ship\nthis  ", runDurationMs: 12_500 }, DEFAULT_CONFIG),
+    buildNotification({ prompt: "  ship\nthis  ", runDurationMs: 12_500, outcome: "complete" }, DEFAULT_CONFIG),
     {
       title: "Pi run complete",
       body: "Prompt: ship this\nDuration: 12.5s",
@@ -51,7 +51,7 @@ test("builds notification content with prompt, duration, urgency, and expiry", (
 
 test("uses a neutral empty-prompt fallback", () => {
   assert.equal(
-    buildNotification({ prompt: "\n\x1b[31m\x1b[0m", runDurationMs: 10_000 }, DEFAULT_CONFIG).body,
+    buildNotification({ prompt: "\n\x1b[31m\x1b[0m", runDurationMs: 10_000, outcome: "complete" }, DEFAULT_CONFIG).body,
     "Prompt: No prompt\nDuration: 10s",
   );
 });
@@ -59,7 +59,7 @@ test("uses a neutral empty-prompt fallback", () => {
 test("hides the prompt while retaining duration", () => {
   assert.equal(
     buildNotification(
-      { prompt: "secret", runDurationMs: 10_000 },
+      { prompt: "secret", runDurationMs: 10_000, outcome: "complete" },
       { ...DEFAULT_CONFIG, showPrompt: false },
     ).body,
     "Duration: 10s",

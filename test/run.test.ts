@@ -87,19 +87,44 @@ test("requires both thresholds at their exact boundaries", async () => {
   }
 });
 
-test("emits only after agent_settled and keeps the first start and latest prompt", async () => {
+test("a final error becomes eligible only after agent_settled", async () => {
+  const s = scenario();
+  await startTui(s);
+  s.harness.sendTerminalInput(FOCUS_OUT);
+  await s.start("failing prompt");
+  s.setNow(10_000);
+  await s.end("error");
+  assert.deepEqual(s.eligible, []);
+
+  await s.settle();
+
+  assert.deepEqual(s.eligible, [{
+    prompt: "failing prompt",
+    runDurationMs: 10_000,
+    outcome: "failed",
+  }]);
+});
+
+test("the final agent end determines the settled outcome", async () => {
   const s = scenario();
   await startTui(s);
   s.harness.sendTerminalInput(FOCUS_OUT);
   await s.start("first prompt");
   s.setNow(4_000);
-  await s.start("queued follow-up");
-  s.setNow(10_000);
   await s.end("error");
   assert.deepEqual(s.eligible, []);
+
+  await s.start("queued follow-up");
+  s.setNow(10_000);
   await s.end("stop");
+  assert.deepEqual(s.eligible, []);
   await s.settle();
-  assert.deepEqual(s.eligible, [{ prompt: "queued follow-up", runDurationMs: 10_000 }]);
+
+  assert.deepEqual(s.eligible, [{
+    prompt: "queued follow-up",
+    runDurationMs: 10_000,
+    outcome: "complete",
+  }]);
 });
 
 test("delays until the remaining continuous-away threshold", async () => {
@@ -119,7 +144,11 @@ test("delays until the remaining continuous-away threshold", async () => {
   assert.deepEqual(s.eligible, []);
   s.setNow(13_000);
   s.runTimer();
-  assert.deepEqual(s.eligible, [{ prompt: "latest prompt", runDurationMs: 10_000 }]);
+  assert.deepEqual(s.eligible, [{
+    prompt: "latest prompt",
+    runDurationMs: 10_000,
+    outcome: "complete",
+  }]);
 });
 
 test("focused, unknown, short, aborted, and interrupted completions stay silent", async () => {
@@ -186,5 +215,9 @@ test("each settled run emits at most once and resets state", async () => {
   await s.end();
   await s.settle();
   await s.settle();
-  assert.deepEqual(s.eligible, [{ prompt: "one", runDurationMs: 10_000 }]);
+  assert.deepEqual(s.eligible, [{
+    prompt: "one",
+    runDurationMs: 10_000,
+    outcome: "complete",
+  }]);
 });
