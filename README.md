@@ -65,7 +65,7 @@ Command and delivery failures are reported in Pi without crashing the session.
 set -g focus-events on
 ```
 
-The extension has zero npm runtime, peer, and optional dependencies. Its deployed source imports only Node built-ins; the Pi API import is type-only and erased at runtime.
+The extension has zero npm runtime, peer, and optional dependencies. Its deployed source uses Node built-ins and Pi's host-provided extension API.
 
 ## Backends And Limits
 

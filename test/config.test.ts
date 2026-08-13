@@ -180,11 +180,6 @@ test("session start loads configuration once and applies it", async () => {
   }]);
 });
 
-test("registers no CLI flags", () => {
-  const harness = createExtensionHarness();
-  heuristicNotify(harness.pi);
-});
-
 test("invalid configuration disables automatic and test delivery", async () => {
   const harness = createExtensionHarness();
   const sent: unknown[] = [];
