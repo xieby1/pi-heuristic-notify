@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExecResult } from "@earendil-works/pi-coding-agent";
 import heuristicNotify, {
+  captureNiriWindowId,
   deliverNotification,
   FLAG_NAMES,
   type NotificationContent,
@@ -19,6 +20,130 @@ const success: ExecResult = { stdout: "", stderr: "", code: 0, killed: false };
 async function flush(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
+
+test("niri capture accepts only the originating Kitty process", async () => {
+  for (const [focusedWindow, expected] of [
+    [{ id: 162, app_id: "kitty", pid: 493_513 }, 162],
+    [{ id: 162, app_id: "firefox", pid: 493_513 }, undefined],
+    [{ id: 162, app_id: "kitty", pid: 1 }, undefined],
+    [{ id: "162", app_id: "kitty", pid: 493_513 }, undefined],
+  ] as const) {
+    const harness = createExtensionHarness({
+      exec: () => ({ ...success, stdout: JSON.stringify(focusedWindow) }),
+    });
+
+    assert.equal(
+      await captureNiriWindowId(harness.pi, "493513", new AbortController().signal),
+      expected,
+    );
+    assert.deepEqual(harness.execCalls[0]?.args, ["msg", "--json", "focused-window"]);
+  }
+});
+
+test("niri capture ignores unavailable IPC, malformed output, and failed identity checks", async () => {
+  for (const exec of [
+    () => { throw new Error("niri unavailable"); },
+    () => ({ ...success, stdout: "not json" }),
+    () => ({ ...success, code: 1, stderr: "IPC failed" }),
+  ]) {
+    const harness = createExtensionHarness({ exec });
+    assert.equal(
+      await captureNiriWindowId(harness.pi, "493513", new AbortController().signal),
+      undefined,
+    );
+  }
+});
+
+test("niri delivery observes the DMS action and restores window, Kitty tab, then tmux pane", async () => {
+  const harness = createExtensionHarness({
+    exec: ({ command }) => command === "notify-send" ? { ...success, stdout: "default\n" } : success,
+  });
+
+  assert.deepEqual(
+    await deliverNotification(
+      harness.pi,
+      notification,
+      { kittyWindowId: "42", niriWindowId: 162, tmuxPane: "%7" },
+      "session-id",
+      new AbortController().signal,
+      "linux",
+    ),
+    { ok: true },
+  );
+  assert.deepEqual(harness.execCalls.map(({ command, args }) => ({ command, args })), [
+    { command: "notify-send", args: [
+      "--app-name=Pi",
+      "--icon=system-monitor",
+      "--urgency=critical",
+      "--expire-time=2500",
+      "--action=default=Open",
+      "Pi run complete",
+      "Prompt: inspect logs\nDuration: 12.5s",
+    ] },
+    { command: "niri", args: ["msg", "action", "focus-window", "--id", "162"] },
+    { command: "kitten", args: ["@", "focus-window", "--match", "id:42"] },
+    { command: "tmux", args: ["select-pane", "-t", "%7"] },
+  ]);
+});
+
+test("niri delivery failures remain non-fatal and never focus another window", async () => {
+  for (const failure of ["notify-send", "niri", "kitten"] as const) {
+    const harness = createExtensionHarness({
+      exec: ({ command }) => {
+        if (command === "notify-send") {
+          return failure === command
+            ? { ...success, code: 1, stderr: "notification failed" }
+            : { ...success, stdout: "default\n" };
+        }
+        return command === failure
+          ? { ...success, code: 1, stderr: `${command} failed` }
+          : success;
+      },
+    });
+
+    const result = await deliverNotification(
+      harness.pi,
+      notification,
+      { kittyWindowId: "42", niriWindowId: 162, tmuxPane: "%7" },
+      "session-id",
+      new AbortController().signal,
+      "linux",
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(
+      harness.execCalls.some(({ command }) => command === "tmux"),
+      failure !== "notify-send",
+    );
+    assert.equal(
+      harness.execCalls.filter(({ command }) => command === "niri").length,
+      failure === "notify-send" ? 0 : 1,
+    );
+  }
+});
+
+test("factory resolves the niri origin at session start without polling", async () => {
+  const harness = createExtensionHarness({
+    exec: ({ command }) => command === "niri"
+      ? { ...success, stdout: JSON.stringify({ id: 162, app_id: "kitty", pid: 493_513 }) }
+      : success,
+  });
+  heuristicNotify(harness.pi, {
+    env: {
+      KITTY_PID: "493513",
+      KITTY_WINDOW_ID: "42",
+      NIRI_SOCKET: "/run/user/1000/niri.sock",
+    },
+    writeTerminal: () => {},
+  });
+
+  assert.equal(harness.execCalls.length, 0);
+  await harness.emit("session_start", { type: "session_start", reason: "startup" }, { mode: "tui" });
+  await flush();
+  assert.deepEqual(harness.execCalls.map(({ command, args }) => ({ command, args })), [
+    { command: "niri", args: ["msg", "--json", "focused-window"] },
+  ]);
+});
 
 test("Kitty receives structured arguments and a unique session identifier", async () => {
   const harness = createExtensionHarness();

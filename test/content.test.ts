@@ -79,6 +79,7 @@ test("automatic eligibility emits structured notification content without shell 
   const notifications: NotificationContent[] = [];
   let now = 0;
   heuristicNotify(harness.pi, {
+    env: {},
     now: () => now,
     writeTerminal: () => {},
     notify: (notification) => { notifications.push(notification); },

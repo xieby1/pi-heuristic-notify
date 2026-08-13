@@ -75,14 +75,25 @@
   - [x] Test Kitty failure falls back to `notify-send` without duplicate delivery after success
   - [x] Test tmux pane selection occurs on activation only, using the captured pane rather than the currently active pane
   - [x] Test notification close, timeout, command failure, and shutdown do not select a pane or reject an event handler
-  - [ ] Manually verify clicking from another Kitty OS window returns to the exact originating window and tab
+  - [x] Add an optional niri IPC fallback for exact OS-window and workspace focus
+    - [x] Capture `niri msg --json focused-window` while the origin is focused and retain its numeric ID only when `app_id` is `kitty` and `pid` matches `KITTY_PID`
+    - [x] After DMS reports activation through `notify-send --action`, focus the captured niri window before the exact Kitty tab and tmux pane
+    - [x] Resolve the niri window lazily when first needed; do not poll in the background or match by mutable window title
+    - [x] Unit-test that capture accepts only `app_id === "kitty"` with a PID matching `KITTY_PID`
+    - [x] Unit-test that DMS activation restores the niri window before the exact Kitty tab and tmux pane
+    - [x] Unit-test that unavailable niri, malformed JSON, identity mismatch, stale window ID, and command failure remain non-fatal and never focus another window
+    - [x] Manually verify a notification click moves niri to the originating Kitty OS window's workspace and selects its exact Kitty tab
+  - [ ] Pursue the standards-compliant Quickshell/DMS activation-token fix upstream
+    - [ ] Have DMS obtain a valid XDG activation token from the notification click and pass it to the action invocation
+    - [ ] Have Quickshell expose `NotificationAction.invoke(token)` and emit `ActivationToken` immediately before `ActionInvoked`, as proposed in Quickshell PR #931
+    - [ ] Remove or retain the niri IPC path only as a fallback once upstream activation reliably focuses the originating OS window and workspace
   - [ ] Manually verify two Pi instances in different Kitty tabs focus the sender, not the most recent instance
   - [ ] Manually verify two Pi instances in different tmux panes select the originating pane after activation
 
 - [x] Wire diagnostics and end-to-end extension behavior
   - [x] Export the default Pi extension factory and keep all mutable state inside its per-session closure
   - [x] Add `/notify-check` to report config, focus source/state, continuous-away duration, run duration, pending delivery, backend, and the current suppression reason
-  - [x] Add `/notify-test` to send a test notification through the selected backend without waiting for heuristic thresholds
+  - [x] Add `/notify-test` to send a test notification through the selected backend without waiting for heuristic thresholds and asynchronously exercise click-to-restore activation
   - [x] Ensure diagnostics report command failures through `ctx.ui.notify()` without crashing Pi
   - [x] Test the factory registers only the required lifecycle handlers and commands
   - [x] Test `/notify-check` reports each major gate: short run, focused, unknown focus, waiting for away threshold, aborted, and eligible

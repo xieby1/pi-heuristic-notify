@@ -145,22 +145,84 @@ test("session start resets diagnostic run state", async () => {
   assert.match(await s.check(), /Focus: terminal events; unknown; away n\/a[\s\S]*Run: n\/a[\s\S]*Suppression: unknown focus$/);
 });
 
-test("notify-test does not wait for notification activation", async () => {
+test("notify-test retries niri origin capture before sending", async () => {
+  let captureAttempts = 0;
+  let resolveAction: ((result: ExecResult) => void) | undefined;
   const s = diagnosticsScenario({
-    env: { KITTY_WINDOW_ID: "42" },
-    exec: ({ args }) => args.includes("--wait-for-completion")
-      ? new Promise(() => {})
-      : success,
+    env: {
+      KITTY_PID: "493513",
+      KITTY_WINDOW_ID: "42",
+      NIRI_SOCKET: "/run/user/1000/niri.sock",
+    },
+    exec: ({ command, args }) => {
+      if (command === "niri" && args.includes("focused-window")) {
+        captureAttempts++;
+        return {
+          ...success,
+          stdout: JSON.stringify(captureAttempts === 1
+            ? { id: 129, app_id: "kitty", pid: 101_699 }
+            : { id: 162, app_id: "kitty", pid: 493_513 }),
+        };
+      }
+      if (command === "notify-send") return new Promise((resolve) => { resolveAction = resolve; });
+      return success;
+    },
   });
   await startTui(s);
+  await new Promise<void>((resolve) => setImmediate(resolve));
 
   await s.harness.runCommand("notify-test");
+  assert.equal(captureAttempts, 2);
 
-  assert.equal(s.harness.execCalls[0]?.args.includes("--wait-for-completion"), false);
-  assert.equal(s.harness.notifications.at(-1)?.message, "Test notification sent");
+  resolveAction!({ ...success, stdout: "default\n" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(
+    s.harness.execCalls.some(({ command, args }) => command === "niri" && args.includes("focus-window")),
+    true,
+  );
 });
 
-test("notify-test reports backend success and failure without throwing", async () => {
+test("notify-test watches the DMS action without blocking the command", async () => {
+  let resolveAction: ((result: ExecResult) => void) | undefined;
+  const s = diagnosticsScenario({
+    env: {
+      KITTY_PID: "493513",
+      KITTY_WINDOW_ID: "42",
+      NIRI_SOCKET: "/run/user/1000/niri.sock",
+    },
+    exec: ({ command, args }) => {
+      if (command === "niri" && args.includes("focused-window")) {
+        return { ...success, stdout: JSON.stringify({ id: 162, app_id: "kitty", pid: 493_513 }) };
+      }
+      if (command === "notify-send") {
+        return new Promise((resolve) => { resolveAction = resolve; });
+      }
+      return success;
+    },
+  });
+  await startTui(s);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  s.harness.execCalls.length = 0;
+
+  let commandDone = false;
+  const command = s.harness.runCommand("notify-test").then(() => { commandDone = true; });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.equal(commandDone, true);
+  assert.equal(s.harness.execCalls[0]?.command, "notify-send");
+  assert.equal(s.harness.execCalls[0]?.args.includes("--action=default=Open"), true);
+  assert.equal(s.harness.notifications.at(-1)?.message, "Test notification sent");
+
+  resolveAction!({ ...success, stdout: "default\n" });
+  await command;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(s.harness.execCalls.slice(1).map(({ command, args }) => ({ command, args })), [
+    { command: "niri", args: ["msg", "action", "focus-window", "--id", "162"] },
+    { command: "kitten", args: ["@", "focus-window", "--match", "id:42"] },
+  ]);
+});
+
+test("notify-test reports eventual backend success and failure without throwing", async () => {
   for (const outcome of ["success", "failure"] as const) {
     const s = diagnosticsScenario({
       env: { KITTY_WINDOW_ID: "42" },
@@ -171,6 +233,7 @@ test("notify-test reports backend success and failure without throwing", async (
     await startTui(s);
 
     await s.harness.runCommand("notify-test");
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     const last = s.harness.notifications.at(-1)!;
     assert.equal(last.type, outcome === "success" ? "info" : "error");
