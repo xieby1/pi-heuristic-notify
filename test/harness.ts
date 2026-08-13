@@ -18,13 +18,16 @@ type Flag = {
   default?: boolean | string;
 };
 
-export function createExtensionHarness(options: {
+export function createExtensionHarness(harnessOptions: {
   flags?: Record<string, boolean | string>;
+  exec?: (
+    call: { command: string; args: string[]; options: ExecOptions | undefined },
+  ) => ExecResult | Promise<ExecResult>;
 } = {}) {
   const handlers = new Map<string, AnyHandler[]>();
   const commands = new Map<string, Command>();
   const flags = new Map<string, Flag>();
-  const flagValues = new Map(Object.entries(options.flags ?? {}));
+  const flagValues = new Map(Object.entries(harnessOptions.flags ?? {}));
   const terminalInputHandlers: TerminalInputHandler[] = [];
   const execCalls: Array<{ command: string; args: string[]; options: ExecOptions | undefined }> = [];
   const notifications: Array<{ message: string; type: "info" | "warning" | "error" | undefined }> = [];
@@ -62,8 +65,9 @@ export function createExtensionHarness(options: {
       return flagValues.get(name);
     },
     async exec(command: string, args: string[], options?: ExecOptions): Promise<ExecResult> {
-      execCalls.push({ command, args, options });
-      return { stdout: "", stderr: "", code: 0, killed: false };
+      const call = { command, args, options };
+      execCalls.push(call);
+      return harnessOptions.exec?.(call) ?? { stdout: "", stderr: "", code: 0, killed: false };
     },
   } as unknown as ExtensionAPI;
 

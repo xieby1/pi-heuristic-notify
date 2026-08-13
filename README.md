@@ -18,6 +18,14 @@ Durations may be zero or fractional, but must be finite and non-negative. Invali
 
 To disable the extension entirely, start Pi without loading it or remove it from Pi's configured extensions. There is no separate enable flag.
 
+## Notification Delivery
+
+Inside Kitty, the extension uses `kitten notify` with a unique identifier for each Pi session. Activating the notification focuses the originating Kitty window and tab. When Pi runs inside tmux, the extension also captures `TMUX_PANE` and selects that pane only after Kitty reports notification activation.
+
+On Linux, a failed or unavailable Kitty notification falls back to `notify-send`. Generic desktop notification servers cannot guarantee that clicking this fallback returns to the originating terminal. Delivery errors are shown in Pi but do not fail or delay settlement.
+
+Kitty, `notify-send`, and tmux commands receive notification content as argument arrays; no shell command string is constructed.
+
 ## Terminal Focus
 
 The extension uses DECSET 1004 focus events to measure continuous time away. Until the terminal reports an authoritative `FocusOut`, focus is unknown and automatic notifications are suppressed.

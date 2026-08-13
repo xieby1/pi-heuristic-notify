@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { stripVTControlCharacters } from "node:util";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -146,6 +147,92 @@ export type NotificationContent = {
   expiryMs: number;
 };
 
+export type NotificationOrigin = {
+  kittyWindowId?: string | undefined;
+  tmuxPane?: string | undefined;
+};
+
+type DeliveryResult =
+  | { ok: true }
+  | { ok: false; error?: string; aborted?: boolean };
+
+function commandError(command: string, result: { code: number; stderr: string; stdout: string }): string {
+  const detail = (result.stderr || result.stdout).trim();
+  return `${command}: ${detail || `exit code ${result.code}`}`;
+}
+
+export async function deliverNotification(
+  pi: ExtensionAPI,
+  notification: NotificationContent,
+  origin: NotificationOrigin,
+  identifier: string,
+  signal: AbortSignal,
+  platform = process.platform,
+): Promise<DeliveryResult> {
+  let kittyError: string | undefined;
+  if (origin.kittyWindowId) {
+    try {
+      const result = await pi.exec("kitten", [
+        "notify",
+        "--app-name=Pi",
+        "--icon=system-monitor",
+        `--urgency=${notification.urgency}`,
+        `--expire-after=${notification.expiryMs / 1_000}s`,
+        `--identifier=${identifier}`,
+        "--wait-for-completion",
+        notification.title,
+        notification.body,
+      ], { signal });
+      if (signal.aborted) return { ok: false, aborted: true };
+      if (result.code === 0) {
+        const activated = result.stdout.trim() === "0";
+        if (activated && origin.tmuxPane) {
+          try {
+            const selected = await pi.exec("tmux", ["select-pane", "-t", origin.tmuxPane], { signal });
+            if (signal.aborted) return { ok: false, aborted: true };
+            if (selected.code !== 0) return { ok: false, error: commandError("tmux", selected) };
+          } catch (error) {
+            if (signal.aborted) return { ok: false, aborted: true };
+            return { ok: false, error: `tmux: ${error instanceof Error ? error.message : String(error)}` };
+          }
+        }
+        return { ok: true };
+      }
+      kittyError = commandError("kitten notify", result);
+    } catch (error) {
+      if (signal.aborted) return { ok: false, aborted: true };
+      kittyError = `kitten notify: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  if (platform !== "linux") return { ok: false, error: kittyError ?? "no supported notification backend" };
+  try {
+    const result = await pi.exec("notify-send", [
+      "--app-name=Pi",
+      "--icon=system-monitor",
+      `--urgency=${notification.urgency}`,
+      `--expire-time=${Math.round(notification.expiryMs)}`,
+      notification.title,
+      notification.body,
+    ], { signal });
+    if (signal.aborted) return { ok: false, aborted: true };
+    if (result.code === 0) return { ok: true };
+    return {
+      ok: false,
+      error: [kittyError, commandError("notify-send", result)].filter(Boolean).join("; "),
+    };
+  } catch (error) {
+    if (signal.aborted) return { ok: false, aborted: true };
+    return {
+      ok: false,
+      error: [
+        kittyError,
+        `notify-send: ${error instanceof Error ? error.message : String(error)}`,
+      ].filter(Boolean).join("; "),
+    };
+  }
+}
+
 export function sanitizePrompt(prompt: string, maxCodePoints = 160): string {
   const normalized = stripVTControlCharacters(prompt)
     .replace(/[\x00-\x1f\x7f]/g, " ")
@@ -182,6 +269,9 @@ type Runtime = {
   onEligible?: (run: EligibleRun) => void | Promise<void>;
   notify?: (notification: NotificationContent) => void | Promise<void>;
   schedule?: (delayMs: number, callback: () => void) => () => void;
+  env?: Record<string, string | undefined>;
+  platform?: NodeJS.Platform;
+  randomUUID?: () => string;
 };
 
 export default function heuristicNotify(
@@ -195,7 +285,15 @@ export default function heuristicNotify(
     return () => clearTimeout(timer);
   });
   const focus = createFocusState();
+  const env = runtime.env ?? process.env;
+  const origin: NotificationOrigin = {
+    kittyWindowId: env.KITTY_WINDOW_ID,
+    tmuxPane: env.TMUX_PANE,
+  };
+  const controllers = new Set<AbortController>();
   let config: NotifyConfig | undefined;
+  let sessionIdentifier = "";
+  let reportError: ((message: string) => void) | undefined;
   let runStart: number | undefined;
   let prompt = "";
   let agentEnded = false;
@@ -203,6 +301,24 @@ export default function heuristicNotify(
   let cancelPending: (() => void) | undefined;
   let unsubscribeInput: (() => void) | undefined;
 
+  const abortDeliveries = () => {
+    for (const controller of controllers) controller.abort();
+    controllers.clear();
+  };
+  const notify = runtime.notify ?? ((notification: NotificationContent) => {
+    const controller = new AbortController();
+    controllers.add(controller);
+    void deliverNotification(
+      pi,
+      notification,
+      origin,
+      sessionIdentifier,
+      controller.signal,
+      runtime.platform,
+    ).then((result) => {
+      if (!result.ok && !result.aborted) reportError?.(result.error ?? "unknown delivery failure");
+    }).finally(() => controllers.delete(controller));
+  });
   const cancelEligibility = () => {
     cancelPending?.();
     cancelPending = undefined;
@@ -224,6 +340,9 @@ export default function heuristicNotify(
   }
 
   pi.on("session_start", (_event, ctx) => {
+    abortDeliveries();
+    sessionIdentifier = `pi-heuristic-notify-session-${(runtime.randomUUID ?? randomUUID)()}`;
+    reportError = (message) => ctx.ui.notify(`pi-heuristic-notify: ${message}`, "error");
     const result = parseConfig(Object.fromEntries(
       Object.values(FLAG_NAMES).map((name) => [name, pi.getFlag(name)]),
     ));
@@ -275,7 +394,7 @@ export default function heuristicNotify(
     const candidate = { prompt: settledPrompt, runDurationMs };
     const deliver = () => {
       void runtime.onEligible?.(candidate);
-      void runtime.notify?.(buildNotification(candidate, settledConfig));
+      void notify(buildNotification(candidate, settledConfig));
     };
     if (awayMs >= minimumAwayMs) {
       deliver();
@@ -293,6 +412,8 @@ export default function heuristicNotify(
 
   pi.on("session_shutdown", () => {
     cancelEligibility();
+    abortDeliveries();
+    reportError = undefined;
     resetRun();
     if (!unsubscribeInput) return;
     unsubscribeInput();

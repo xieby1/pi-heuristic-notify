@@ -64,17 +64,17 @@
   - [x] Test the hide-prompt option still shows run duration
 
 - [ ] Deliver notifications and restore the exact origin where supported
-  - [ ] Capture the originating Kitty window and tmux pane identifiers per extension instance
-  - [ ] Prefer `kitten notify` inside Kitty so notification activation focuses the originating Kitty window/tab
-  - [ ] Use a unique notification identifier per Pi session to avoid cross-instance replacement
-  - [ ] When inside tmux, wait asynchronously for Kitty activation and select the captured `TMUX_PANE` only when activation is reported
-  - [ ] Abort outstanding activation watchers during session shutdown without blocking Pi settlement
-  - [ ] Fall back to `notify-send` on Linux when Kitty delivery is unavailable; document that generic notification servers cannot guarantee click-to-focus
-  - [ ] Treat delivery failures as non-fatal and expose the reason through diagnostics
-  - [ ] Test Kitty command arguments include title, body, urgency, expiry, and unique session identifier
-  - [ ] Test Kitty failure falls back to `notify-send` without duplicate delivery after success
-  - [ ] Test tmux pane selection occurs on activation only, using the captured pane rather than the currently active pane
-  - [ ] Test notification close, timeout, command failure, and shutdown do not select a pane or reject an event handler
+  - [x] Capture the originating Kitty window and tmux pane identifiers per extension instance
+  - [x] Prefer `kitten notify` inside Kitty so notification activation focuses the originating Kitty window/tab
+  - [x] Use a unique notification identifier per Pi session to avoid cross-instance replacement
+  - [x] When inside tmux, wait asynchronously for Kitty activation and select the captured `TMUX_PANE` only when activation is reported
+  - [x] Abort outstanding activation watchers during session shutdown without blocking Pi settlement
+  - [x] Fall back to `notify-send` on Linux when Kitty delivery is unavailable; document that generic notification servers cannot guarantee click-to-focus
+  - [x] Treat delivery failures as non-fatal and expose the reason through diagnostics
+  - [x] Test Kitty command arguments include title, body, urgency, expiry, and unique session identifier
+  - [x] Test Kitty failure falls back to `notify-send` without duplicate delivery after success
+  - [x] Test tmux pane selection occurs on activation only, using the captured pane rather than the currently active pane
+  - [x] Test notification close, timeout, command failure, and shutdown do not select a pane or reject an event handler
   - [ ] Manually verify clicking from another Kitty OS window returns to the exact originating window and tab
   - [ ] Manually verify two Pi instances in different Kitty tabs focus the sender, not the most recent instance
   - [ ] Manually verify two Pi instances in different tmux panes select the originating pane after activation
