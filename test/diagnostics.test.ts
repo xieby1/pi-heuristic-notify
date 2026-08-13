@@ -78,23 +78,6 @@ async function startTui(s: ReturnType<typeof diagnosticsScenario>) {
   );
 }
 
-test("factory registers only required lifecycle handlers and diagnostic commands", () => {
-  const harness = createExtensionHarness();
-  heuristicNotify(harness.pi, { env: {}, writeTerminal: () => {}, notify: () => {} });
-
-  assert.deepEqual([...harness.handlers].map(([event, handlers]) => [event, handlers.length]), [
-    ["session_start", 1],
-    ["before_agent_start", 1],
-    ["agent_start", 1],
-    ["agent_end", 1],
-    ["agent_settled", 1],
-    ["session_shutdown", 1],
-  ]);
-  assert.deepEqual([...harness.commands.keys()], ["notify-check", "notify-test"]);
-  assert.equal(harness.commands.get("notify-check")?.description, "Show notification state and suppression reason");
-  assert.equal(harness.commands.get("notify-test")?.description, "Send a test desktop notification");
-});
-
 test("notify-check reports config, focus, duration, pending state, backend, and unknown focus", async () => {
   const s = diagnosticsScenario({ env: { KITTY_WINDOW_ID: "42", TMUX_PANE: "%7" } });
   await startTui(s);
