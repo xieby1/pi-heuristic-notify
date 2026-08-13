@@ -1,0 +1,102 @@
+- [ ] Establish the package and test foundation
+  - [ ] Add an ESM `package.json` with the Pi entrypoint, `test`, `typecheck`, and loader-smoke scripts
+  - [ ] Keep `dependencies`, `peerDependencies`, and `optionalDependencies` empty; put Pi types, TypeScript, and Node types in `devDependencies`
+  - [ ] Add a strict `tsconfig.json` and include the source and tests
+  - [ ] Add Node.js/npm to `shell.nix` so the development environment is reproducible
+  - [ ] Add a minimal fake `ExtensionAPI` test harness that captures event handlers, commands, terminal input, and `pi.exec` calls
+  - [ ] Test the harness by registering and emitting one event
+  - [ ] Add a `DefaultResourceLoader` smoke test that loads the real TypeScript entrypoint without starting an agent or model
+  - [ ] Add a package test that fails if npm runtime dependencies are introduced
+
+- [ ] Define and validate user configuration
+  - [ ] Register package-prefixed native Pi flags for `notify-minimum-run-seconds`, `notify-minimum-away-seconds`, urgency, expiry time, and hiding the prompt
+  - [ ] Use conservative defaults: 10 seconds of work, 5 seconds continuously away, normal urgency, 10-second expiry, and prompt shown
+  - [ ] Parse configuration once per session and reject non-finite, negative, or unsupported values with a visible error
+  - [ ] Document that users can disable the extension by not loading it; do not add another enable switch
+  - [ ] Test defaults and every valid override
+  - [ ] Test exact zero values and fractional seconds
+  - [ ] Test invalid numbers and urgency values disable notification delivery instead of silently changing behavior
+
+- [ ] Track continuous terminal focus accurately
+  - [ ] Implement a pure scanner for DECSET 1004 `FocusIn` (`ESC [ I`) and `FocusOut` (`ESC [ O`) sequences embedded in terminal input
+  - [ ] Track `focused`, whether any authoritative focus event was observed, and `unfocusedSince`
+  - [ ] Set `unfocusedSince` only on the focused-to-unfocused transition; repeated `FocusOut` events must not reset it
+  - [ ] Clear `unfocusedSince` immediately on `FocusIn`
+  - [ ] Enable focus reporting and subscribe through `ctx.ui.onTerminalInput()` only in TUI mode
+  - [ ] Consume focus sequences while preserving unrelated input in the same chunk
+  - [ ] Disable focus reporting and unsubscribe idempotently on session shutdown
+  - [ ] Suppress automatic notifications when focus state or continuous-away start time is unknown; a current-focus query alone cannot prove continuous absence
+  - [ ] Document that tmux must have `focus-events` enabled for continuous-away tracking
+  - [ ] Test standalone, repeated, mixed, and interleaved focus sequences
+  - [ ] Test that `FocusOut` starts the timer once and `FocusIn` resets it
+  - [ ] Test fresh extension instances do not share focus state
+  - [ ] Test non-TUI sessions write no escape sequences and register no terminal listener
+  - [ ] Test shutdown unsubscribes once, cancels pending work, and emits DECSET 1004 disable once
+
+- [ ] Model one fully settled Pi run and apply both heuristic gates
+  - [ ] Record the first `agent_start` time in a busy cycle without resetting it for retries or queued follow-ups
+  - [ ] Record the latest user prompt from `before_agent_start`
+  - [ ] Record `agent_end` and the final assistant stop reason so interrupted or aborted runs stay silent
+  - [ ] Evaluate completion only on `agent_settled`; do not notify from `agent_end`
+  - [ ] Require `runDuration >= minimumRunDuration` and an authoritative unfocused state at settlement
+  - [ ] Notify immediately when the continuous-away threshold already holds
+  - [ ] When settlement occurs unfocused but before the away threshold, schedule delivery for the remaining time
+  - [ ] Cancel scheduled delivery on `FocusIn`, a new run, session shutdown, or loss of the originating session
+  - [ ] Never schedule a later notification for a run that completed while focused
+  - [ ] Reset run state after every settled outcome so one run can produce at most one notification
+  - [ ] Test values just below, exactly at, and just above both thresholds
+  - [ ] Test the two thresholds use AND semantics
+  - [ ] Test delayed delivery fires only after the remaining continuous-away interval
+  - [ ] Test brief focus loss, refocus, and a second focus loss restart the away interval
+  - [ ] Test focused-at-completion, unknown focus, short run, aborted run, and missing `agent_end` remain silent
+  - [ ] Test retries and queued follow-ups do not notify before the final `agent_settled`
+  - [ ] Test a new run and session shutdown cancel a pending notification
+  - [ ] Use an injected clock and scheduler in all timing tests; use no real sleeps
+
+- [ ] Build safe notification content
+  - [ ] Include the last user prompt and measured run duration in every automatic notification
+  - [ ] Normalize whitespace, remove terminal/control characters, and truncate long prompts by Unicode code points
+  - [ ] Provide a neutral fallback when the prompt is empty and honor the hide-prompt option
+  - [ ] Format durations consistently across milliseconds, seconds, and minutes
+  - [ ] Pass notification text as argument arrays, never through a shell command string
+  - [ ] Test prompt extraction, empty prompts, multiline prompts, Unicode truncation, and control-character removal
+  - [ ] Test duration formatting at unit boundaries
+  - [ ] Test the hide-prompt option still shows run duration
+
+- [ ] Deliver notifications and restore the exact origin where supported
+  - [ ] Capture the originating Kitty window and tmux pane identifiers per extension instance
+  - [ ] Prefer `kitten notify` inside Kitty so notification activation focuses the originating Kitty window/tab
+  - [ ] Use a unique notification identifier per Pi session to avoid cross-instance replacement
+  - [ ] When inside tmux, wait asynchronously for Kitty activation and select the captured `TMUX_PANE` only when activation is reported
+  - [ ] Abort outstanding activation watchers during session shutdown without blocking Pi settlement
+  - [ ] Fall back to `notify-send` on Linux when Kitty delivery is unavailable; document that generic notification servers cannot guarantee click-to-focus
+  - [ ] Treat delivery failures as non-fatal and expose the reason through diagnostics
+  - [ ] Test Kitty command arguments include title, body, urgency, expiry, and unique session identifier
+  - [ ] Test Kitty failure falls back to `notify-send` without duplicate delivery after success
+  - [ ] Test tmux pane selection occurs on activation only, using the captured pane rather than the currently active pane
+  - [ ] Test notification close, timeout, command failure, and shutdown do not select a pane or reject an event handler
+  - [ ] Manually verify clicking from another Kitty OS window returns to the exact originating window and tab
+  - [ ] Manually verify two Pi instances in different Kitty tabs focus the sender, not the most recent instance
+  - [ ] Manually verify two Pi instances in different tmux panes select the originating pane after activation
+
+- [ ] Wire diagnostics and end-to-end extension behavior
+  - [ ] Export the default Pi extension factory and keep all mutable state inside its per-session closure
+  - [ ] Add `/notify-check` to report config, focus source/state, continuous-away duration, run duration, pending delivery, backend, and the current suppression reason
+  - [ ] Add `/notify-test` to send a test notification through the selected backend without waiting for heuristic thresholds
+  - [ ] Ensure diagnostics report command failures through `ctx.ui.notify()` without crashing Pi
+  - [ ] Test the factory registers only the required lifecycle handlers and commands
+  - [ ] Test `/notify-check` reports each major gate: short run, focused, unknown focus, waiting for away threshold, aborted, and eligible
+  - [ ] Test `/notify-test` reports delivery success and failure
+  - [ ] Run the real-loader smoke test after wiring the complete entrypoint
+
+- [ ] Document, package, and verify the release
+  - [ ] Write a concise README with installation, Pi flags, defaults, Kitty requirements, tmux `focus-events`, commands, and backend limitations
+  - [ ] Document the exact heuristic: a run must be long enough and the terminal must remain continuously unfocused long enough
+  - [ ] Document that runs completed while focused are never notified later
+  - [ ] Document the zero-runtime-dependency guarantee and supported Node/Pi versions
+  - [ ] Keep done-tab markers, broad cross-platform backends, and visibility detection out of the initial release
+  - [ ] Re-check that `package.json` has no runtime, peer, or optional npm dependencies and that the packed extension imports only Node built-ins plus erased Pi types
+  - [ ] Run `npm test`, strict typechecking, and the loader smoke test
+  - [ ] Run `npm pack --dry-run` and inspect the package contents
+  - [ ] Install the packed extension with Pi and exercise `/notify-check` and `/notify-test`
+  - [ ] Manually verify short runs, brief focus changes, aborted runs, retries, queued follow-ups, watched completions, delayed-away completions, and qualifying unattended runs

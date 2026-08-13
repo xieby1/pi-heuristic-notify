@@ -43,3 +43,12 @@ Strong fit for the current Kitty/Linux environment. Uses Kitty remote control pl
 ### Conclusion
 
 No surveyed public extension implements both minimum run duration and minimum continuous unfocused duration. `pi-ping` provides the best lifecycle and focus-tracking reference; `desktop-notify-kitty` provides the best Kitty-specific focus and delivery reference.
+
+## Unit Testing
+
+- Use Node's built-in `node:test` and `node:assert`; keep Pi, TypeScript, and Node types in `devDependencies` only.
+- Invoke the default extension factory with a minimal fake `ExtensionAPI`. Capture callbacks passed to `pi.on()`, then call them with controlled events and context objects.
+- Keep heuristic decisions in pure exported functions and test exact threshold boundaries, focus resets, aborted/trivial runs, and notification formatting.
+- Inject a clock such as `now: () => number`; never use real sleeps in unit tests.
+- Test completion through `agent_settled`, not `agent_end`, so retries and queued follow-ups are excluded.
+- Use one `DefaultResourceLoader` smoke test to verify the TypeScript entrypoint loads. Test real Kitty/tmux focus and desktop notification behavior manually through `/notify-check` or `pi -e`.
