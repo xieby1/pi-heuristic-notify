@@ -133,14 +133,46 @@ export function parseConfig(values: Record<string, unknown>): ConfigResult {
   };
 }
 
+export type EligibleRun = {
+  prompt: string;
+  runDurationMs: number;
+};
+
+type Runtime = {
+  now?: () => number;
+  writeTerminal?: (data: string) => void;
+  onEligible?: (run: EligibleRun) => void | Promise<void>;
+  schedule?: (delayMs: number, callback: () => void) => () => void;
+};
+
 export default function heuristicNotify(
   pi: ExtensionAPI,
-  runtime: { now?: () => number; writeTerminal?: (data: string) => void } = {},
+  runtime: Runtime = {},
 ): void {
   const now = runtime.now ?? Date.now;
   const write = runtime.writeTerminal ?? writeTerminal;
+  const schedule = runtime.schedule ?? ((delayMs, callback) => {
+    const timer = setTimeout(callback, delayMs);
+    return () => clearTimeout(timer);
+  });
   const focus = createFocusState();
+  let config: NotifyConfig | undefined;
+  let runStart: number | undefined;
+  let prompt = "";
+  let agentEnded = false;
+  let stopReason: string | undefined;
+  let cancelPending: (() => void) | undefined;
   let unsubscribeInput: (() => void) | undefined;
+
+  const cancelEligibility = () => {
+    cancelPending?.();
+    cancelPending = undefined;
+  };
+  const resetRun = () => {
+    runStart = undefined;
+    agentEnded = false;
+    stopReason = undefined;
+  };
   const flags = [
     [FLAG_NAMES.minimumRunSeconds, "Minimum Pi run duration in seconds", "string", "10"],
     [FLAG_NAMES.minimumAwaySeconds, "Minimum continuously unfocused duration in seconds", "string", "5"],
@@ -156,10 +188,12 @@ export default function heuristicNotify(
     const result = parseConfig(Object.fromEntries(
       Object.values(FLAG_NAMES).map((name) => [name, pi.getFlag(name)]),
     ));
+    config = result.ok ? result.config : undefined;
     if (!result.ok) ctx.ui.notify(`pi-heuristic-notify disabled: ${result.error}`, "error");
 
     if (ctx.mode !== "tui" || unsubscribeInput) return;
     unsubscribeInput = ctx.ui.onTerminalInput((data) => {
+      if (data.includes(`${ESC}[I`)) cancelEligibility();
       const output = scanFocusInput(data, focus, now());
       if (output === undefined) return undefined;
       return output === null ? { consume: true } : { data: output };
@@ -167,7 +201,55 @@ export default function heuristicNotify(
     write(ENABLE_FOCUS_REPORTING);
   });
 
+  pi.on("before_agent_start", (event) => {
+    prompt = event.prompt;
+  });
+
+  pi.on("agent_start", () => {
+    cancelEligibility();
+    runStart ??= now();
+    agentEnded = false;
+    stopReason = undefined;
+  });
+
+  pi.on("agent_end", (event) => {
+    agentEnded = true;
+    stopReason = [...event.messages].reverse().find((message) => message.role === "assistant")?.stopReason;
+  });
+
+  pi.on("agent_settled", () => {
+    const settledAt = now();
+    const startedAt = runStart;
+    const ended = agentEnded;
+    const finalStopReason = stopReason;
+    const settledPrompt = prompt;
+    resetRun();
+
+    if (!config || startedAt === undefined || !ended || finalStopReason === "aborted") return;
+    const runDurationMs = settledAt - startedAt;
+    if (runDurationMs < config.minimumRunMs) return;
+    const awayMs = continuousAwayMs(focus, settledAt);
+    if (awayMs === undefined) return;
+
+    const minimumAwayMs = config.minimumAwayMs;
+    const candidate = { prompt: settledPrompt, runDurationMs };
+    if (awayMs >= minimumAwayMs) {
+      void runtime.onEligible?.(candidate);
+      return;
+    }
+
+    cancelPending = schedule(minimumAwayMs - awayMs, () => {
+      cancelPending = undefined;
+      const currentAwayMs = continuousAwayMs(focus, now());
+      if (currentAwayMs !== undefined && currentAwayMs >= minimumAwayMs) {
+        void runtime.onEligible?.(candidate);
+      }
+    });
+  });
+
   pi.on("session_shutdown", () => {
+    cancelEligibility();
+    resetRun();
     if (!unsubscribeInput) return;
     unsubscribeInput();
     unsubscribeInput = undefined;

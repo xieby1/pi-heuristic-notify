@@ -33,25 +33,25 @@
   - [x] Test non-TUI sessions write no escape sequences and register no terminal listener
   - [x] Test shutdown unsubscribes once, cancels pending work, and emits DECSET 1004 disable once
 
-- [ ] Model one fully settled Pi run and apply both heuristic gates
-  - [ ] Record the first `agent_start` time in a busy cycle without resetting it for retries or queued follow-ups
-  - [ ] Record the latest user prompt from `before_agent_start`
-  - [ ] Record `agent_end` and the final assistant stop reason so interrupted or aborted runs stay silent
-  - [ ] Evaluate completion only on `agent_settled`; do not notify from `agent_end`
-  - [ ] Require `runDuration >= minimumRunDuration` and an authoritative unfocused state at settlement
-  - [ ] Notify immediately when the continuous-away threshold already holds
-  - [ ] When settlement occurs unfocused but before the away threshold, schedule delivery for the remaining time
-  - [ ] Cancel scheduled delivery on `FocusIn`, a new run, session shutdown, or loss of the originating session
-  - [ ] Never schedule a later notification for a run that completed while focused
-  - [ ] Reset run state after every settled outcome so one run can produce at most one notification
-  - [ ] Test values just below, exactly at, and just above both thresholds
-  - [ ] Test the two thresholds use AND semantics
-  - [ ] Test delayed delivery fires only after the remaining continuous-away interval
-  - [ ] Test brief focus loss, refocus, and a second focus loss restart the away interval
-  - [ ] Test focused-at-completion, unknown focus, short run, aborted run, and missing `agent_end` remain silent
-  - [ ] Test retries and queued follow-ups do not notify before the final `agent_settled`
-  - [ ] Test a new run and session shutdown cancel a pending notification
-  - [ ] Use an injected clock and scheduler in all timing tests; use no real sleeps
+- [x] Model one fully settled Pi run and apply both heuristic gates
+  - [x] Record the first `agent_start` time in a busy cycle without resetting it for retries or queued follow-ups
+  - [x] Record the latest user prompt from `before_agent_start`
+  - [x] Record `agent_end` and the final assistant stop reason so interrupted or aborted runs stay silent
+  - [x] Evaluate completion only on `agent_settled`; do not notify from `agent_end`
+  - [x] Require `runDuration >= minimumRunDuration` and an authoritative unfocused state at settlement
+  - [x] Notify immediately when the continuous-away threshold already holds
+  - [x] When settlement occurs unfocused but before the away threshold, schedule delivery for the remaining time
+  - [x] Cancel scheduled delivery on `FocusIn`, a new run, session shutdown, or loss of the originating session
+  - [x] Never schedule a later notification for a run that completed while focused
+  - [x] Reset run state after every settled outcome so one run can produce at most one notification
+  - [x] Test values just below, exactly at, and just above both thresholds
+  - [x] Test the two thresholds use AND semantics
+  - [x] Test delayed delivery fires only after the remaining continuous-away interval
+  - [x] Test brief focus loss, refocus, and a second focus loss restart the away interval
+  - [x] Test focused-at-completion, unknown focus, short run, aborted run, and missing `agent_end` remain silent
+  - [x] Test retries and queued follow-ups do not notify before the final `agent_settled`
+  - [x] Test a new run and session shutdown cancel a pending notification
+  - [x] Use an injected clock and scheduler in all timing tests; use no real sleeps
 
 - [ ] Build safe notification content
   - [ ] Include the last user prompt and measured run duration in every automatic notification
