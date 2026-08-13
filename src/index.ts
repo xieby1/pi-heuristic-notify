@@ -79,59 +79,37 @@ type ConfigResult =
   | { ok: true; config: NotifyConfig }
   | { ok: false; error: string };
 
-function seconds(value: unknown, flag: string, fallbackMs: number): number | string {
+function seconds(value: unknown, property: string, fallbackMs: number): number | string {
   if (value === undefined) return fallbackMs;
-  if (typeof value !== "string" || value.trim() === "") {
-    return `--${flag} must be a finite non-negative number`;
-  }
-  const parsed = Number(value);
-  const milliseconds = parsed * 1000;
-  return Number.isFinite(milliseconds) && parsed >= 0
+  const milliseconds = typeof value === "number" ? value * 1_000 : NaN;
+  return Number.isFinite(milliseconds) && value as number >= 0
     ? milliseconds
-    : `--${flag} must be a finite non-negative number`;
+    : `${property} must be a finite non-negative number`;
 }
 
 export function parseConfig(values: Record<string, unknown>): ConfigResult {
-  const minimumRunMs = seconds(
-    values[FLAG_NAMES.minimumRunSeconds],
-    FLAG_NAMES.minimumRunSeconds,
-    DEFAULT_CONFIG.minimumRunMs,
-  );
+  const minimumRunMs = seconds(values.minimumRunSeconds, "minimumRunSeconds", DEFAULT_CONFIG.minimumRunMs);
   if (typeof minimumRunMs === "string") return { ok: false, error: minimumRunMs };
 
-  const minimumAwayMs = seconds(
-    values[FLAG_NAMES.minimumAwaySeconds],
-    FLAG_NAMES.minimumAwaySeconds,
-    DEFAULT_CONFIG.minimumAwayMs,
-  );
+  const minimumAwayMs = seconds(values.minimumAwaySeconds, "minimumAwaySeconds", DEFAULT_CONFIG.minimumAwayMs);
   if (typeof minimumAwayMs === "string") return { ok: false, error: minimumAwayMs };
 
-  const expiryMs = seconds(
-    values[FLAG_NAMES.expirySeconds],
-    FLAG_NAMES.expirySeconds,
-    DEFAULT_CONFIG.expiryMs,
-  );
+  const expiryMs = seconds(values.expirySeconds, "expirySeconds", DEFAULT_CONFIG.expiryMs);
   if (typeof expiryMs === "string") return { ok: false, error: expiryMs };
 
-  const urgency = values[FLAG_NAMES.urgency] ?? DEFAULT_CONFIG.urgency;
+  const urgency = values.urgency ?? DEFAULT_CONFIG.urgency;
   if (urgency !== "low" && urgency !== "normal" && urgency !== "critical") {
-    return { ok: false, error: `--${FLAG_NAMES.urgency} must be low, normal, or critical` };
+    return { ok: false, error: "urgency must be low, normal, or critical" };
   }
 
-  const hidePrompt = values[FLAG_NAMES.hidePrompt] ?? false;
-  if (typeof hidePrompt !== "boolean") {
-    return { ok: false, error: `--${FLAG_NAMES.hidePrompt} must be boolean` };
+  const showPrompt = values.showPrompt ?? DEFAULT_CONFIG.showPrompt;
+  if (typeof showPrompt !== "boolean") {
+    return { ok: false, error: "showPrompt must be boolean" };
   }
 
   return {
     ok: true,
-    config: {
-      minimumRunMs,
-      minimumAwayMs,
-      urgency,
-      expiryMs,
-      showPrompt: !hidePrompt,
-    },
+    config: { minimumRunMs, minimumAwayMs, urgency, expiryMs, showPrompt },
   };
 }
 
@@ -489,9 +467,17 @@ export default function heuristicNotify(
     Object.assign(focus, createFocusState());
     sessionIdentifier = `pi-heuristic-notify-session-${(runtime.randomUUID ?? randomUUID)()}`;
     reportError = (message) => ctx.ui.notify(`pi-heuristic-notify: ${message}`, "error");
-    const result = parseConfig(Object.fromEntries(
-      Object.values(FLAG_NAMES).map((name) => [name, pi.getFlag(name)]),
-    ));
+    const flagNumber = (name: string) => {
+      const value = pi.getFlag(name);
+      return typeof value === "string" && value.trim() ? Number(value) : value;
+    };
+    const result = parseConfig({
+      minimumRunSeconds: flagNumber(FLAG_NAMES.minimumRunSeconds),
+      minimumAwaySeconds: flagNumber(FLAG_NAMES.minimumAwaySeconds),
+      urgency: pi.getFlag(FLAG_NAMES.urgency),
+      expirySeconds: flagNumber(FLAG_NAMES.expirySeconds),
+      showPrompt: !pi.getFlag(FLAG_NAMES.hidePrompt),
+    });
     config = result.ok ? result.config : undefined;
     suppression = result.ok ? "unknown focus" : "invalid config";
     if (!result.ok) ctx.ui.notify(`pi-heuristic-notify disabled: ${result.error}`, "error");

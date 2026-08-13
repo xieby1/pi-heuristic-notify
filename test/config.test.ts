@@ -11,22 +11,29 @@ test("uses conservative defaults", () => {
   assert.deepEqual(parseConfig({}), { ok: true, config: DEFAULT_CONFIG });
 });
 
-test("accepts every override", () => {
+test("merges partial JSON configuration over defaults", () => {
+  assert.deepEqual(parseConfig({ minimumRunSeconds: 2.5 }), {
+    ok: true,
+    config: { ...DEFAULT_CONFIG, minimumRunMs: 2_500 },
+  });
+});
+
+test("accepts every JSON configuration property", () => {
   assert.deepEqual(
     parseConfig({
-      [FLAG_NAMES.minimumRunSeconds]: "2.5",
-      [FLAG_NAMES.minimumAwaySeconds]: "0",
-      [FLAG_NAMES.urgency]: "critical",
-      [FLAG_NAMES.expirySeconds]: "1.25",
-      [FLAG_NAMES.hidePrompt]: true,
+      minimumRunSeconds: 2.5,
+      minimumAwaySeconds: 0,
+      urgency: "critical",
+      expirySeconds: 1.25,
+      showPrompt: false,
     }),
     {
       ok: true,
       config: {
-        minimumRunMs: 2500,
+        minimumRunMs: 2_500,
         minimumAwayMs: 0,
         urgency: "critical",
-        expiryMs: 1250,
+        expiryMs: 1_250,
         showPrompt: false,
       },
     },
@@ -35,24 +42,39 @@ test("accepts every override", () => {
 
 for (const urgency of ["low", "normal", "critical"] as const) {
   test(`accepts ${urgency} urgency`, () => {
-    const result = parseConfig({ [FLAG_NAMES.urgency]: urgency });
+    const result = parseConfig({ urgency });
     assert.equal(result.ok && result.config.urgency, urgency);
   });
 }
 
-for (const [flag, value] of [
-  [FLAG_NAMES.minimumRunSeconds, "-1"],
-  [FLAG_NAMES.minimumAwaySeconds, "Infinity"],
-  [FLAG_NAMES.expirySeconds, "1e308"],
-  [FLAG_NAMES.expirySeconds, "NaN"],
-  [FLAG_NAMES.minimumRunSeconds, ""],
-  [FLAG_NAMES.minimumRunSeconds, true],
-  [FLAG_NAMES.urgency, "urgent"],
+for (const [property, value] of [
+  ["minimumRunSeconds", -1],
+  ["minimumAwaySeconds", Infinity],
+  ["expirySeconds", Number.MAX_VALUE],
+  ["expirySeconds", NaN],
+  ["minimumRunSeconds", "1"],
+  ["minimumAwaySeconds", true],
+  ["expirySeconds", null],
+  ["urgency", "urgent"],
+  ["showPrompt", "false"],
 ] as const) {
-  test(`rejects invalid ${flag} value ${JSON.stringify(value)}`, () => {
-    const result = parseConfig({ [flag]: value });
+  test(`rejects invalid ${property} value ${JSON.stringify(value)}`, () => {
+    const result = parseConfig({ [property]: value });
     assert.equal(result.ok, false);
-    if (!result.ok) assert.match(result.error, new RegExp(flag));
+    if (!result.ok) assert.match(result.error, new RegExp(property));
+  });
+}
+
+for (const property of ["minimumRunSeconds", "minimumAwaySeconds", "expirySeconds"] as const) {
+  test(`accepts zero and fractional ${property}`, () => {
+    for (const value of [0, 0.5]) assert.equal(parseConfig({ [property]: value }).ok, true);
+  });
+}
+
+for (const showPrompt of [true, false]) {
+  test(`accepts showPrompt ${showPrompt}`, () => {
+    const result = parseConfig({ showPrompt });
+    assert.equal(result.ok && result.config.showPrompt, showPrompt);
   });
 }
 
@@ -87,7 +109,7 @@ test("reports invalid configuration and disables delivery", async () => {
 
   assert.deepEqual(harness.notifications, [
     {
-      message: "pi-heuristic-notify disabled: --notify-urgency must be low, normal, or critical",
+      message: "pi-heuristic-notify disabled: urgency must be low, normal, or critical",
       type: "error",
     },
   ]);
