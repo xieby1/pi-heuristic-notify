@@ -7,7 +7,7 @@ run duration >= minimum run duration
 and continuous terminal unfocused duration >= minimum away duration
 ```
 
-A run completed while focused is suppressed permanently; leaving the terminal afterward does not notify for that run. Unknown focus, short runs, aborted or interrupted runs, retries, queued follow-ups, and brief focus changes are also suppressed.
+A final settled run can notify whether it completed successfully or failed; failed runs use the title `Pi run failed`. Intermediate tool or agent errors do not notify while Pi can retry or continue. A run settled while focused is suppressed permanently; leaving the terminal afterward does not notify for that run. Unknown focus, short runs, aborted or interrupted runs, retries, queued follow-ups, and brief focus changes are also suppressed.
 
 ## Install
 
