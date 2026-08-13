@@ -9,6 +9,18 @@ and continuous terminal unfocused duration >= minimum away duration
 
 A final settled run can notify whether it completed successfully or failed; failed runs use the title `Pi run failed`. Intermediate tool or agent errors do not notify while Pi can retry or continue. A run settled while focused is suppressed permanently; leaving the terminal afterward does not notify for that run. Unknown focus, short runs, aborted or interrupted runs, retries, queued follow-ups, and brief focus changes are also suppressed.
 
+## Why This Extension
+
+Existing Pi notification extensions cover parts of this workflow, but not the complete heuristic:
+
+| Extension | Settled lifecycle | Minimum run time | Minimum continuous away time | Exact-origin activation |
+| --- | --- | --- | --- | --- |
+| [`pi-ping`](https://github.com/Bukutsu/pi-ping) | Yes | Fixed work gate using duration, tools, or errors | No; checks focus only at completion | Partial Kitty/tmux support |
+| [`desktop-notify-kitty`](https://github.com/cjrh/desktop-notify-kitty) | No; uses `agent_end` | No | No | Kitty-focused |
+| `pi-heuristic-notify` | Yes, using `agent_settled` | Configurable | Configurable and continuous | Originating niri window, Kitty tab/window, and tmux pane where available |
+
+This extension was created to avoid notifications that are technically correct but not useful: short work, momentary focus changes, intermediate retries, queued continuations, and completions that the user already watched. Requiring both sustained work and sustained absence makes a notification mean that Pi finished something worth returning to. Exact-origin activation then returns the user to the Pi instance that sent it rather than whichever terminal was used most recently.
+
 ## Install
 
 Install from npm after publication:
