@@ -7,9 +7,9 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import heuristicNotify, {
   configPath,
   DEFAULT_CONFIG,
-  FLAG_NAMES,
   loadConfig,
   parseConfig,
+  type NotificationContent,
 } from "../src/index.ts";
 import { createExtensionHarness } from "./harness.ts";
 
@@ -133,49 +133,103 @@ for (const [name, contents] of [
   });
 }
 
-test("loads configuration once when a session starts", async () => {
+test("session start loads configuration once and applies it", async () => {
   const harness = createExtensionHarness();
+  const sent: NotificationContent[] = [];
   let reads = 0;
+  let now = 0;
   heuristicNotify(harness.pi, {
+    now: () => now,
+    writeTerminal: () => {},
+    notify: (notification) => { sent.push(notification); },
     loadConfig: () => {
       reads++;
-      return { ok: true, config: DEFAULT_CONFIG };
+      return {
+        ok: true,
+        config: {
+          ...DEFAULT_CONFIG,
+          minimumRunMs: 0,
+          minimumAwayMs: 0,
+          urgency: "critical",
+          expiryMs: 2_500,
+          showPrompt: false,
+        },
+      };
     },
   });
 
-  assert.equal(reads, 0);
-  await harness.emit("session_start", { type: "session_start", reason: "startup" });
+  await harness.emit("session_start", { type: "session_start", reason: "startup" }, { mode: "tui" });
+  harness.sendTerminalInput("\x1b[O");
+  await harness.emit("before_agent_start", { type: "before_agent_start", prompt: "secret" });
+  await harness.emit("agent_start", { type: "agent_start" });
+  now = 1_000;
+  await harness.emit("agent_end", {
+    type: "agent_end",
+    messages: [{ role: "assistant", stopReason: "stop" }],
+  });
+  await harness.emit("agent_settled", { type: "agent_settled" });
+  await harness.runCommand("notify-check");
+
   assert.equal(reads, 1);
+  assert.match(harness.notifications.at(-1)!.message, /Config: run >= 0ms; away >= 0ms; urgency critical; expiry 2\.5s; prompt hidden/);
+  assert.deepEqual(sent, [{
+    body: "Duration: 1s",
+    urgency: "critical",
+    expiryMs: 2_500,
+    title: "Pi run complete",
+  }]);
 });
 
-test("still registers prefixed flags pending their removal", async () => {
+test("registers no CLI flags", () => {
   const harness = createExtensionHarness();
-
-  heuristicNotify(harness.pi, { loadConfig: () => ({ ok: true, config: DEFAULT_CONFIG }) });
-  await harness.emit("session_start", { type: "session_start", reason: "startup" });
-
-  assert.deepEqual([...harness.flags], [
-    [FLAG_NAMES.minimumRunSeconds, { description: "Minimum Pi run duration in seconds", type: "string", default: "10" }],
-    [FLAG_NAMES.minimumAwaySeconds, { description: "Minimum continuously unfocused duration in seconds", type: "string", default: "5" }],
-    [FLAG_NAMES.urgency, { description: "Notification urgency: low, normal, or critical", type: "string", default: "normal" }],
-    [FLAG_NAMES.expirySeconds, { description: "Notification expiry time in seconds", type: "string", default: "10" }],
-    [FLAG_NAMES.hidePrompt, { description: "Hide the last user prompt in notifications", type: "boolean", default: false }],
-  ]);
-  assert.deepEqual(harness.notifications, []);
+  heuristicNotify(harness.pi);
 });
 
-test("reports invalid configuration and disables delivery", async () => {
+test("invalid configuration disables automatic and test delivery", async () => {
   const harness = createExtensionHarness();
-
+  const sent: unknown[] = [];
+  let now = 0;
   heuristicNotify(harness.pi, {
+    now: () => now,
+    writeTerminal: () => {},
+    notify: (notification) => { sent.push(notification); },
     loadConfig: () => ({ ok: false, error: "/agent/pi-heuristic-notify.json: urgency must be low, normal, or critical" }),
   });
-  await harness.emit("session_start", { type: "session_start", reason: "startup" });
+  await harness.emit("session_start", { type: "session_start", reason: "startup" }, { mode: "tui" });
+  harness.sendTerminalInput("\x1b[O");
+  await harness.emit("before_agent_start", { type: "before_agent_start", prompt: "ignored" });
+  await harness.emit("agent_start", { type: "agent_start" });
+  now = 10_000;
+  await harness.emit("agent_end", {
+    type: "agent_end",
+    messages: [{ role: "assistant", stopReason: "stop" }],
+  });
+  await harness.emit("agent_settled", { type: "agent_settled" });
+  await harness.runCommand("notify-test");
 
+  assert.deepEqual(sent, []);
   assert.deepEqual(harness.notifications, [
     {
       message: "pi-heuristic-notify disabled: /agent/pi-heuristic-notify.json: urgency must be low, normal, or critical",
       type: "error",
     },
+    { message: "Test notification failed: invalid configuration", type: "error" },
   ]);
+});
+
+test("new session reads changed configuration", async () => {
+  const harness = createExtensionHarness();
+  let minimumRunMs = 1_000;
+  heuristicNotify(harness.pi, {
+    loadConfig: () => ({ ok: true, config: { ...DEFAULT_CONFIG, minimumRunMs } }),
+  });
+
+  await harness.emit("session_start", { type: "session_start", reason: "startup" });
+  await harness.runCommand("notify-check");
+  assert.match(harness.notifications.at(-1)!.message, /Config: run >= 1s/);
+
+  minimumRunMs = 2_000;
+  await harness.emit("session_start", { type: "session_start", reason: "switch" });
+  await harness.runCommand("notify-check");
+  assert.match(harness.notifications.at(-1)!.message, /Config: run >= 2s/);
 });

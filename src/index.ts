@@ -50,14 +50,6 @@ function writeTerminal(data: string): void {
   }
 }
 
-export const FLAG_NAMES = {
-  minimumRunSeconds: "notify-minimum-run-seconds",
-  minimumAwaySeconds: "notify-minimum-away-seconds",
-  urgency: "notify-urgency",
-  expirySeconds: "notify-expiry-seconds",
-  hidePrompt: "notify-hide-prompt",
-} as const;
-
 export type NotificationUrgency = "low" | "normal" | "critical";
 
 export type NotifyConfig = {
@@ -421,17 +413,6 @@ export default function heuristicNotify(
     agentEnded = false;
     stopReason = undefined;
   };
-  const flags = [
-    [FLAG_NAMES.minimumRunSeconds, "Minimum Pi run duration in seconds", "string", "10"],
-    [FLAG_NAMES.minimumAwaySeconds, "Minimum continuously unfocused duration in seconds", "string", "5"],
-    [FLAG_NAMES.urgency, "Notification urgency: low, normal, or critical", "string", "normal"],
-    [FLAG_NAMES.expirySeconds, "Notification expiry time in seconds", "string", "10"],
-    [FLAG_NAMES.hidePrompt, "Hide the last user prompt in notifications", "boolean", false],
-  ] as const;
-  for (const [name, description, type, defaultValue] of flags) {
-    pi.registerFlag(name, { description, type, default: defaultValue });
-  }
-
   pi.registerCommand("notify-check", {
     description: "Show notification state and suppression reason",
     handler: async (_args, ctx) => {

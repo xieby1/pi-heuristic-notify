@@ -12,22 +12,14 @@ import type {
 
 type AnyHandler = ExtensionHandler<ExtensionEvent, unknown>;
 type Command = Omit<RegisteredCommand, "name" | "sourceInfo">;
-type Flag = {
-  description?: string;
-  type: "boolean" | "string";
-  default?: boolean | string;
-};
 
 export function createExtensionHarness(harnessOptions: {
-  flags?: Record<string, boolean | string>;
   exec?: (
     call: { command: string; args: string[]; options: ExecOptions | undefined },
   ) => ExecResult | Promise<ExecResult>;
 } = {}) {
   const handlers = new Map<string, AnyHandler[]>();
   const commands = new Map<string, Command>();
-  const flags = new Map<string, Flag>();
-  const flagValues = new Map(Object.entries(harnessOptions.flags ?? {}));
   const terminalInputHandlers: TerminalInputHandler[] = [];
   const execCalls: Array<{ command: string; args: string[]; options: ExecOptions | undefined }> = [];
   const notifications: Array<{ message: string; type: "info" | "warning" | "error" | undefined }> = [];
@@ -57,13 +49,6 @@ export function createExtensionHarness(harnessOptions: {
     registerCommand(name: string, command: Command) {
       commands.set(name, command);
     },
-    registerFlag(name: string, flag: Flag) {
-      flags.set(name, flag);
-      if (flag.default !== undefined && !flagValues.has(name)) flagValues.set(name, flag.default);
-    },
-    getFlag(name: string) {
-      return flagValues.get(name);
-    },
     async exec(command: string, args: string[], options?: ExecOptions): Promise<ExecResult> {
       const call = { command, args, options };
       execCalls.push(call);
@@ -76,7 +61,6 @@ export function createExtensionHarness(harnessOptions: {
     context,
     handlers,
     commands,
-    flags,
     execCalls,
     notifications,
     async emit(event: string, value: object, override: Partial<ExtensionContext> = {}) {

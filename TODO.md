@@ -15,12 +15,12 @@
   - [x] Add failing tests that malformed JSON, a non-object JSON root, and invalid property values return a useful error containing the config path.
   - [x] Implement one read on session startup with Node's built-in JSON and filesystem APIs; add no dependency, file watcher, or generated config file.
 
-- [ ] Make the config file the sole configuration source.
-  - [ ] Add a failing factory test that `session_start` loads the file once and applies its values to `/notify-check` and notification content.
-  - [ ] Add a failing factory test that invalid configuration visibly disables automatic delivery and `/notify-test` for the session.
-  - [ ] Add a failing reload test that a new `session_start` re-reads changed configuration.
-  - [ ] Remove `FLAG_NAMES`, all `registerFlag()` calls, `getFlag()` reads, and command-option parsing.
-  - [ ] Remove obsolete flag support from the fake `ExtensionAPI` harness if no other test uses it.
+- [x] Make the config file the sole configuration source.
+  - [x] Add a failing factory test that `session_start` loads the file once and applies its values to `/notify-check` and notification content.
+  - [x] Add a failing factory test that invalid configuration visibly disables automatic delivery and `/notify-test` for the session.
+  - [x] Add a failing reload test that a new `session_start` re-reads changed configuration.
+  - [x] Remove `FLAG_NAMES`, all `registerFlag()` calls, `getFlag()` reads, and command-option parsing.
+  - [x] Remove obsolete flag support from the fake `ExtensionAPI` harness if no other test uses it.
 
 - [ ] Update user-facing configuration documentation.
   - [ ] Replace the CLI option section with the path `~/.pi/agent/pi-heuristic-notify.json`, its JSON shape, defaults, partial override behavior, and `/reload` instructions.
