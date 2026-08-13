@@ -168,6 +168,7 @@ export async function deliverNotification(
   identifier: string,
   signal: AbortSignal,
   platform = process.platform,
+  waitForActivation = true,
 ): Promise<DeliveryResult> {
   let kittyError: string | undefined;
   if (origin.kittyWindowId) {
@@ -179,13 +180,13 @@ export async function deliverNotification(
         `--urgency=${notification.urgency}`,
         `--expire-after=${notification.expiryMs / 1_000}s`,
         `--identifier=${identifier}`,
-        "--wait-for-completion",
+        ...(waitForActivation ? ["--wait-for-completion"] : []),
         notification.title,
         notification.body,
       ], { signal });
       if (signal.aborted) return { ok: false, aborted: true };
       if (result.code === 0) {
-        const activated = result.stdout.trim() === "0";
+        const activated = waitForActivation && result.stdout.trim() === "0";
         if (activated && origin.tmuxPane) {
           try {
             const selected = await pi.exec("tmux", ["select-pane", "-t", origin.tmuxPane], { signal });
@@ -307,7 +308,11 @@ export default function heuristicNotify(
     for (const controller of controllers) controller.abort();
     controllers.clear();
   };
-  const send = async (notification: NotificationContent, identifier = sessionIdentifier) => {
+  const send = async (
+    notification: NotificationContent,
+    identifier = sessionIdentifier,
+    waitForActivation = true,
+  ) => {
     const controller = new AbortController();
     controllers.add(controller);
     try {
@@ -318,6 +323,7 @@ export default function heuristicNotify(
         identifier,
         controller.signal,
         runtime.platform,
+        waitForActivation,
       );
     } finally {
       controllers.delete(controller);
@@ -384,7 +390,7 @@ export default function heuristicNotify(
         body: "Desktop notifications are working.",
         urgency: config.urgency,
         expiryMs: config.expiryMs,
-      }, `${sessionIdentifier}-test`);
+      }, `${sessionIdentifier}-test`, false);
       if (result.ok) ctx.ui.notify("Test notification sent", "info");
       else if (!result.aborted) ctx.ui.notify(`Test notification failed: ${result.error ?? "unknown delivery failure"}`, "error");
     },

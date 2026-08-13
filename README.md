@@ -1,6 +1,29 @@
 # pi-heuristic-notify
 
-Pi extension that notifies after a sufficiently long run while its terminal has remained unfocused.
+Pi extension that sends a desktop notification only after Pi fully settles and both conditions hold:
+
+```text
+run duration >= minimum run duration
+and continuous terminal unfocused duration >= minimum away duration
+```
+
+A run completed while focused is suppressed permanently; leaving the terminal afterward does not notify for that run. Unknown focus, short runs, aborted or interrupted runs, retries, queued follow-ups, and brief focus changes are also suppressed.
+
+## Install
+
+Install from npm after publication:
+
+```bash
+pi install npm:pi-heuristic-notify
+```
+
+For local development or evaluation:
+
+```bash
+pi install /absolute/path/to/pi-heuristic-notify
+```
+
+Restart Pi after installation, or run `/reload` in an existing session.
 
 ## Configuration
 
@@ -14,30 +37,33 @@ Pass options when starting Pi:
 --notify-hide-prompt                      Omit the last prompt (default: false)
 ```
 
-Durations may be zero or fractional, but must be finite and non-negative. Invalid configuration reports an error and disables notifications for the session.
+Durations may be zero or fractional, but must be finite and non-negative. Invalid configuration reports an error and disables notifications for the session. To disable the extension entirely, remove it from Pi or do not load it.
 
-To disable the extension entirely, start Pi without loading it or remove it from Pi's configured extensions. There is no separate enable flag.
+## Commands
 
-## Notification Delivery
+- `/notify-check` reports configuration, focus and away time, run duration, pending delivery, backend, and suppression reason.
+- `/notify-test` sends an immediate test through the selected backend without applying heuristic thresholds.
 
-Inside Kitty, the extension uses `kitten notify` with a unique identifier for each Pi session. Activating the notification focuses the originating Kitty window and tab. When Pi runs inside tmux, the extension also captures `TMUX_PANE` and selects that pane only after Kitty reports notification activation.
+Command and delivery failures are reported in Pi without crashing the session.
 
-On Linux, a failed or unavailable Kitty notification falls back to `notify-send`. Generic desktop notification servers cannot guarantee that clicking this fallback returns to the originating terminal. Delivery errors are shown in Pi but do not fail or delay settlement.
+## Requirements
 
-Kitty, `notify-send`, and tmux commands receive notification content as argument arrays; no shell command string is constructed.
-
-## Diagnostics
-
-Use `/notify-check` to inspect the active configuration, terminal focus and away duration, last run duration, pending delivery, selected backend, and current suppression reason.
-
-Use `/notify-test` to send an immediate test through the selected backend. The command reports success or the backend error in Pi without applying the run or away thresholds.
-
-## Terminal Focus
-
-The extension uses DECSET 1004 focus events to measure continuous time away. Until the terminal reports an authoritative `FocusOut`, focus is unknown and automatic notifications are suppressed.
-
-When running inside tmux, enable focus event forwarding:
+- Node.js 22.19 or newer.
+- Pi 0.82.1 (tested).
+- Kitty 0.36 or newer for notification activation that focuses the originating Kitty window and tab.
+- Linux `notify-send` for fallback delivery outside Kitty or when Kitty delivery fails.
+- tmux `focus-events` when running inside tmux:
 
 ```tmux
 set -g focus-events on
 ```
+
+The extension has zero npm runtime, peer, and optional dependencies. Its deployed source imports only Node built-ins; the Pi API import is type-only and erased at runtime.
+
+## Backends And Limits
+
+Inside Kitty, `kitten notify` uses a unique identifier per Pi session. Activating it focuses the originating Kitty window and tab; inside tmux, the captured `TMUX_PANE` is selected only after activation. Outstanding activation watchers are aborted on session shutdown.
+
+On Linux, failed or unavailable Kitty delivery falls back to `notify-send`. Generic notification servers cannot guarantee that clicking returns to the originating terminal. Commands receive notification content as argument arrays, never shell command strings.
+
+The initial release targets Kitty and Linux. It does not implement done-tab markers, broad cross-platform backends, or terminal visibility detection.

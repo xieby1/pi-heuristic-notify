@@ -145,6 +145,21 @@ test("session start resets diagnostic run state", async () => {
   assert.match(await s.check(), /Focus: terminal events; unknown; away n\/a[\s\S]*Run: n\/a[\s\S]*Suppression: unknown focus$/);
 });
 
+test("notify-test does not wait for notification activation", async () => {
+  const s = diagnosticsScenario({
+    env: { KITTY_WINDOW_ID: "42" },
+    exec: ({ args }) => args.includes("--wait-for-completion")
+      ? new Promise(() => {})
+      : success,
+  });
+  await startTui(s);
+
+  await s.harness.runCommand("notify-test");
+
+  assert.equal(s.harness.execCalls[0]?.args.includes("--wait-for-completion"), false);
+  assert.equal(s.harness.notifications.at(-1)?.message, "Test notification sent");
+});
+
 test("notify-test reports backend success and failure without throwing", async () => {
   for (const outcome of ["success", "failure"] as const) {
     const s = diagnosticsScenario({

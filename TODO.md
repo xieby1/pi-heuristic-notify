@@ -90,13 +90,13 @@
   - [x] Run the real-loader smoke test after wiring the complete entrypoint
 
 - [ ] Document, package, and verify the release
-  - [ ] Write a concise README with installation, Pi flags, defaults, Kitty requirements, tmux `focus-events`, commands, and backend limitations
-  - [ ] Document the exact heuristic: a run must be long enough and the terminal must remain continuously unfocused long enough
-  - [ ] Document that runs completed while focused are never notified later
-  - [ ] Document the zero-runtime-dependency guarantee and supported Node/Pi versions
-  - [ ] Keep done-tab markers, broad cross-platform backends, and visibility detection out of the initial release
-  - [ ] Re-check that `package.json` has no runtime, peer, or optional npm dependencies and that the packed extension imports only Node built-ins plus erased Pi types
-  - [ ] Run `npm test`, strict typechecking, and the loader smoke test
-  - [ ] Run `npm pack --dry-run` and inspect the package contents
-  - [ ] Install the packed extension with Pi and exercise `/notify-check` and `/notify-test`
+  - [x] Write a concise README with installation, Pi flags, defaults, Kitty requirements, tmux `focus-events`, commands, and backend limitations
+  - [x] Document the exact heuristic: a run must be long enough and the terminal must remain continuously unfocused long enough
+  - [x] Document that runs completed while focused are never notified later
+  - [x] Document the zero-runtime-dependency guarantee and supported Node/Pi versions
+  - [x] Keep done-tab markers, broad cross-platform backends, and visibility detection out of the initial release
+  - [x] Re-check that `package.json` has no runtime, peer, or optional npm dependencies and that the packed extension imports only Node built-ins plus erased Pi types
+  - [x] Run `npm test`, strict typechecking, and the loader smoke test
+  - [x] Run `npm pack --dry-run` and inspect the package contents
+  - [x] Install the packed extension with Pi and exercise `/notify-check` and `/notify-test`
   - [ ] Manually verify short runs, brief focus changes, aborted runs, retries, queued follow-ups, watched completions, delayed-away completions, and qualifying unattended runs

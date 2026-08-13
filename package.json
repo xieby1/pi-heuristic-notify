@@ -2,6 +2,15 @@
   "name": "pi-heuristic-notify",
   "version": "0.1.0",
   "description": "Notify when Pi settles after sustained work while the terminal is unfocused",
+  "keywords": [
+    "pi-package"
+  ],
+  "files": [
+    "src"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.ts",
