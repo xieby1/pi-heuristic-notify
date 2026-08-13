@@ -1,12 +1,12 @@
-- [ ] Establish the package and test foundation
-  - [ ] Add an ESM `package.json` with the Pi entrypoint, `test`, `typecheck`, and loader-smoke scripts
-  - [ ] Keep `dependencies`, `peerDependencies`, and `optionalDependencies` empty; put Pi types, TypeScript, and Node types in `devDependencies`
-  - [ ] Add a strict `tsconfig.json` and include the source and tests
-  - [ ] Add Node.js/npm to `shell.nix` so the development environment is reproducible
-  - [ ] Add a minimal fake `ExtensionAPI` test harness that captures event handlers, commands, terminal input, and `pi.exec` calls
-  - [ ] Test the harness by registering and emitting one event
-  - [ ] Add a `DefaultResourceLoader` smoke test that loads the real TypeScript entrypoint without starting an agent or model
-  - [ ] Add a package test that fails if npm runtime dependencies are introduced
+- [x] Establish the package and test foundation
+  - [x] Add an ESM `package.json` with the Pi entrypoint, `test`, `typecheck`, and loader-smoke scripts
+  - [x] Keep `dependencies`, `peerDependencies`, and `optionalDependencies` empty; put Pi types, TypeScript, and Node types in `devDependencies`
+  - [x] Add a strict `tsconfig.json` and include the source and tests
+  - [x] Add Node.js/npm to `shell.nix` so the development environment is reproducible
+  - [x] Add a minimal fake `ExtensionAPI` test harness that captures event handlers, commands, terminal input, and `pi.exec` calls
+  - [x] Test the harness by registering and emitting one event
+  - [x] Add a `DefaultResourceLoader` smoke test that loads the real TypeScript entrypoint without starting an agent or model
+  - [x] Add a package test that fails if npm runtime dependencies are introduced
 
 - [ ] Define and validate user configuration
   - [ ] Register package-prefixed native Pi flags for `notify-minimum-run-seconds`, `notify-minimum-away-seconds`, urgency, expiry time, and hiding the prompt

@@ -1,0 +1,21 @@
+{
+  "name": "pi-heuristic-notify",
+  "version": "0.1.0",
+  "description": "Notify when Pi settles after sustained work while the terminal is unfocused",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "loader-smoke": "node --test test/loader.smoke.ts"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.82.1",
+    "@types/node": "22.19.15",
+    "typescript": "5.9.3"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}
