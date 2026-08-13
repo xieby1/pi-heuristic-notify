@@ -79,15 +79,15 @@
   - [ ] Manually verify two Pi instances in different Kitty tabs focus the sender, not the most recent instance
   - [ ] Manually verify two Pi instances in different tmux panes select the originating pane after activation
 
-- [ ] Wire diagnostics and end-to-end extension behavior
-  - [ ] Export the default Pi extension factory and keep all mutable state inside its per-session closure
-  - [ ] Add `/notify-check` to report config, focus source/state, continuous-away duration, run duration, pending delivery, backend, and the current suppression reason
-  - [ ] Add `/notify-test` to send a test notification through the selected backend without waiting for heuristic thresholds
-  - [ ] Ensure diagnostics report command failures through `ctx.ui.notify()` without crashing Pi
-  - [ ] Test the factory registers only the required lifecycle handlers and commands
-  - [ ] Test `/notify-check` reports each major gate: short run, focused, unknown focus, waiting for away threshold, aborted, and eligible
-  - [ ] Test `/notify-test` reports delivery success and failure
-  - [ ] Run the real-loader smoke test after wiring the complete entrypoint
+- [x] Wire diagnostics and end-to-end extension behavior
+  - [x] Export the default Pi extension factory and keep all mutable state inside its per-session closure
+  - [x] Add `/notify-check` to report config, focus source/state, continuous-away duration, run duration, pending delivery, backend, and the current suppression reason
+  - [x] Add `/notify-test` to send a test notification through the selected backend without waiting for heuristic thresholds
+  - [x] Ensure diagnostics report command failures through `ctx.ui.notify()` without crashing Pi
+  - [x] Test the factory registers only the required lifecycle handlers and commands
+  - [x] Test `/notify-check` reports each major gate: short run, focused, unknown focus, waiting for away threshold, aborted, and eligible
+  - [x] Test `/notify-test` reports delivery success and failure
+  - [x] Run the real-loader smoke test after wiring the complete entrypoint
 
 - [ ] Document, package, and verify the release
   - [ ] Write a concise README with installation, Pi flags, defaults, Kitty requirements, tmux `focus-events`, commands, and backend limitations

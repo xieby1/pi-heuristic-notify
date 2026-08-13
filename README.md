@@ -26,6 +26,12 @@ On Linux, a failed or unavailable Kitty notification falls back to `notify-send`
 
 Kitty, `notify-send`, and tmux commands receive notification content as argument arrays; no shell command string is constructed.
 
+## Diagnostics
+
+Use `/notify-check` to inspect the active configuration, terminal focus and away duration, last run duration, pending delivery, selected backend, and current suppression reason.
+
+Use `/notify-test` to send an immediate test through the selected backend. The command reports success or the backend error in Pi without applying the run or away thresholds.
+
 ## Terminal Focus
 
 The extension uses DECSET 1004 focus events to measure continuous time away. Until the terminal reports an authoritative `FocusOut`, focus is unknown and automatic notifications are suppressed.

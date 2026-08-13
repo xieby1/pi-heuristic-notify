@@ -74,6 +74,7 @@ export function createExtensionHarness(harnessOptions: {
   return {
     pi,
     context,
+    handlers,
     commands,
     flags,
     execCalls,

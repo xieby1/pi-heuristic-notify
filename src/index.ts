@@ -295,6 +295,8 @@ export default function heuristicNotify(
   let sessionIdentifier = "";
   let reportError: ((message: string) => void) | undefined;
   let runStart: number | undefined;
+  let lastRunDurationMs: number | undefined;
+  let suppression = "unknown focus";
   let prompt = "";
   let agentEnded = false;
   let stopReason: string | undefined;
@@ -305,19 +307,26 @@ export default function heuristicNotify(
     for (const controller of controllers) controller.abort();
     controllers.clear();
   };
-  const notify = runtime.notify ?? ((notification: NotificationContent) => {
+  const send = async (notification: NotificationContent, identifier = sessionIdentifier) => {
     const controller = new AbortController();
     controllers.add(controller);
-    void deliverNotification(
-      pi,
-      notification,
-      origin,
-      sessionIdentifier,
-      controller.signal,
-      runtime.platform,
-    ).then((result) => {
+    try {
+      return await deliverNotification(
+        pi,
+        notification,
+        origin,
+        identifier,
+        controller.signal,
+        runtime.platform,
+      );
+    } finally {
+      controllers.delete(controller);
+    }
+  };
+  const notify = runtime.notify ?? ((notification: NotificationContent) => {
+    void send(notification).then((result) => {
       if (!result.ok && !result.aborted) reportError?.(result.error ?? "unknown delivery failure");
-    }).finally(() => controllers.delete(controller));
+    });
   });
   const cancelEligibility = () => {
     cancelPending?.();
@@ -339,19 +348,69 @@ export default function heuristicNotify(
     pi.registerFlag(name, { description, type, default: defaultValue });
   }
 
+  pi.registerCommand("notify-check", {
+    description: "Show notification state and suppression reason",
+    handler: async (_args, ctx) => {
+      const at = now();
+      const awayMs = continuousAwayMs(focus, at);
+      const focusState = !focus.observed ? "unknown" : focus.focused ? "focused" : "unfocused";
+      const runDurationMs = runStart === undefined ? lastRunDurationMs : at - runStart;
+      const backend = origin.kittyWindowId
+        ? `Kitty${origin.tmuxPane ? ` + tmux pane ${origin.tmuxPane}` : ""}`
+        : (runtime.platform ?? process.platform) === "linux" ? "notify-send" : "unsupported";
+      const configText = config
+        ? `run >= ${formatDuration(config.minimumRunMs)}; away >= ${formatDuration(config.minimumAwayMs)}; urgency ${config.urgency}; expiry ${formatDuration(config.expiryMs)}; prompt ${config.showPrompt ? "shown" : "hidden"}`
+        : "invalid";
+      ctx.ui.notify([
+        `Config: ${configText}`,
+        `Focus: terminal events; ${focusState}; away ${awayMs === undefined ? "n/a" : formatDuration(awayMs)}`,
+        `Run: ${runDurationMs === undefined ? "n/a" : formatDuration(runDurationMs)}`,
+        `Pending delivery: ${cancelPending ? "yes" : "no"}`,
+        `Backend: ${backend}`,
+        `Suppression: ${suppression}`,
+      ].join("\n"), "info");
+    },
+  });
+
+  pi.registerCommand("notify-test", {
+    description: "Send a test desktop notification",
+    handler: async (_args, ctx) => {
+      if (!config) {
+        ctx.ui.notify("Test notification failed: invalid configuration", "error");
+        return;
+      }
+      const result = await send({
+        title: "Pi notification test",
+        body: "Desktop notifications are working.",
+        urgency: config.urgency,
+        expiryMs: config.expiryMs,
+      }, `${sessionIdentifier}-test`);
+      if (result.ok) ctx.ui.notify("Test notification sent", "info");
+      else if (!result.aborted) ctx.ui.notify(`Test notification failed: ${result.error ?? "unknown delivery failure"}`, "error");
+    },
+  });
+
   pi.on("session_start", (_event, ctx) => {
     abortDeliveries();
+    cancelEligibility();
+    resetRun();
+    lastRunDurationMs = undefined;
+    Object.assign(focus, createFocusState());
     sessionIdentifier = `pi-heuristic-notify-session-${(runtime.randomUUID ?? randomUUID)()}`;
     reportError = (message) => ctx.ui.notify(`pi-heuristic-notify: ${message}`, "error");
     const result = parseConfig(Object.fromEntries(
       Object.values(FLAG_NAMES).map((name) => [name, pi.getFlag(name)]),
     ));
     config = result.ok ? result.config : undefined;
+    suppression = result.ok ? "unknown focus" : "invalid config";
     if (!result.ok) ctx.ui.notify(`pi-heuristic-notify disabled: ${result.error}`, "error");
 
     if (ctx.mode !== "tui" || unsubscribeInput) return;
     unsubscribeInput = ctx.ui.onTerminalInput((data) => {
-      if (data.includes(`${ESC}[I`)) cancelEligibility();
+      if (data.includes(`${ESC}[I`)) {
+        cancelEligibility();
+        suppression = "focused";
+      }
       const output = scanFocusInput(data, focus, now());
       if (output === undefined) return undefined;
       return output === null ? { consume: true } : { data: output };
@@ -366,6 +425,7 @@ export default function heuristicNotify(
   pi.on("agent_start", () => {
     cancelEligibility();
     runStart ??= now();
+    suppression = "run in progress";
     agentEnded = false;
     stopReason = undefined;
   });
@@ -383,16 +443,35 @@ export default function heuristicNotify(
     const settledPrompt = prompt;
     resetRun();
 
-    if (!config || startedAt === undefined || !ended || finalStopReason === "aborted") return;
+    lastRunDurationMs = startedAt === undefined ? undefined : settledAt - startedAt;
+    if (!config) {
+      suppression = "invalid config";
+      return;
+    }
+    if (startedAt === undefined || !ended) {
+      suppression = "interrupted";
+      return;
+    }
+    if (finalStopReason === "aborted") {
+      suppression = "aborted";
+      return;
+    }
     const settledConfig = config;
-    const runDurationMs = settledAt - startedAt;
-    if (runDurationMs < settledConfig.minimumRunMs) return;
+    const runDurationMs = lastRunDurationMs!;
+    if (runDurationMs < settledConfig.minimumRunMs) {
+      suppression = "short run";
+      return;
+    }
     const awayMs = continuousAwayMs(focus, settledAt);
-    if (awayMs === undefined) return;
+    if (awayMs === undefined) {
+      suppression = focus.observed ? "focused" : "unknown focus";
+      return;
+    }
 
     const minimumAwayMs = settledConfig.minimumAwayMs;
     const candidate = { prompt: settledPrompt, runDurationMs };
     const deliver = () => {
+      suppression = "eligible";
       void runtime.onEligible?.(candidate);
       void notify(buildNotification(candidate, settledConfig));
     };
@@ -401,6 +480,7 @@ export default function heuristicNotify(
       return;
     }
 
+    suppression = "waiting for away threshold";
     cancelPending = schedule(minimumAwayMs - awayMs, () => {
       cancelPending = undefined;
       const currentAwayMs = continuousAwayMs(focus, now());
