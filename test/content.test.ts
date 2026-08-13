@@ -3,7 +3,6 @@ import test from "node:test";
 import heuristicNotify, {
   buildNotification,
   DEFAULT_CONFIG,
-  FLAG_NAMES,
   formatDuration,
   sanitizePrompt,
   type NotificationContent,
@@ -68,17 +67,20 @@ test("hides the prompt while retaining duration", () => {
 });
 
 test("automatic eligibility emits structured notification content without shell execution", async () => {
-  const harness = createExtensionHarness({
-    flags: {
-      [FLAG_NAMES.minimumRunSeconds]: "0",
-      [FLAG_NAMES.minimumAwaySeconds]: "0",
-      [FLAG_NAMES.urgency]: "critical",
-      [FLAG_NAMES.expirySeconds]: "2.5",
-    },
-  });
+  const harness = createExtensionHarness();
   const notifications: NotificationContent[] = [];
   let now = 0;
   heuristicNotify(harness.pi, {
+    loadConfig: () => ({
+      ok: true,
+      config: {
+        ...DEFAULT_CONFIG,
+        minimumRunMs: 0,
+        minimumAwayMs: 0,
+        urgency: "critical",
+        expiryMs: 2_500,
+      },
+    }),
     env: {},
     now: () => now,
     writeTerminal: () => {},

@@ -1,22 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import heuristicNotify, { FLAG_NAMES, type EligibleRun } from "../src/index.ts";
+import heuristicNotify, { DEFAULT_CONFIG, type EligibleRun } from "../src/index.ts";
 import { createExtensionHarness } from "./harness.ts";
 
 const FOCUS_IN = "\x1b[I";
 const FOCUS_OUT = "\x1b[O";
 
-function scenario(minimumRunSeconds = "10", minimumAwaySeconds = "5") {
-  const harness = createExtensionHarness({
-    flags: {
-      [FLAG_NAMES.minimumRunSeconds]: minimumRunSeconds,
-      [FLAG_NAMES.minimumAwaySeconds]: minimumAwaySeconds,
-    },
-  });
+function scenario(minimumRunSeconds = 10, minimumAwaySeconds = 5) {
+  const harness = createExtensionHarness();
   const eligible: EligibleRun[] = [];
   let now = 0;
   let timer: { at: number; callback: () => void } | undefined;
   heuristicNotify(harness.pi, {
+    loadConfig: () => ({
+      ok: true,
+      config: {
+        ...DEFAULT_CONFIG,
+        minimumRunMs: minimumRunSeconds * 1_000,
+        minimumAwayMs: minimumAwaySeconds * 1_000,
+      },
+    }),
     now: () => now,
     writeTerminal: () => {},
     onEligible: (run) => { eligible.push(run); },
@@ -100,7 +103,7 @@ test("emits only after agent_settled and keeps the first start and latest prompt
 });
 
 test("delays until the remaining continuous-away threshold", async () => {
-  const s = scenario("10", "5");
+  const s = scenario(10, 5);
   await startTui(s);
   await s.start();
   s.setNow(8_000);

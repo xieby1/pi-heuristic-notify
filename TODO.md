@@ -8,12 +8,12 @@
   - [x] Add failing tests that `urgency` accepts only `low`, `normal`, or `critical`, and `showPrompt` accepts only booleans.
   - [x] Rename the parsed properties to `minimumRunSeconds`, `minimumAwaySeconds`, `expirySeconds`, `urgency`, and positive `showPrompt`; keep milliseconds internal after validation.
 
-- [ ] Load `pi-heuristic-notify.json` from Pi's global agent directory.
-  - [ ] Add failing tests that the path is `join(getAgentDir(), "pi-heuristic-notify.json")`, including a custom `PI_CODING_AGENT_DIR` through the injected path in tests.
-  - [ ] Add failing tests that a missing file uses `DEFAULT_CONFIG` without warning.
-  - [ ] Add failing tests that valid JSON loads partial overrides and ignores no specified defaults.
-  - [ ] Add failing tests that malformed JSON, a non-object JSON root, and invalid property values return a useful error containing the config path.
-  - [ ] Implement one read on session startup with Node's built-in JSON and filesystem APIs; add no dependency, file watcher, or generated config file.
+- [x] Load `pi-heuristic-notify.json` from Pi's global agent directory.
+  - [x] Add failing tests that the path is `join(getAgentDir(), "pi-heuristic-notify.json")`, including a custom `PI_CODING_AGENT_DIR` through the injected path in tests.
+  - [x] Add failing tests that a missing file uses `DEFAULT_CONFIG` without warning.
+  - [x] Add failing tests that valid JSON loads partial overrides and ignores no specified defaults.
+  - [x] Add failing tests that malformed JSON, a non-object JSON root, and invalid property values return a useful error containing the config path.
+  - [x] Implement one read on session startup with Node's built-in JSON and filesystem APIs; add no dependency, file watcher, or generated config file.
 
 - [ ] Make the config file the sole configuration source.
   - [ ] Add a failing factory test that `session_start` loads the file once and applies its values to `/notify-check` and notification content.

@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import heuristicNotify, {
+  configPath,
   DEFAULT_CONFIG,
   FLAG_NAMES,
+  loadConfig,
   parseConfig,
 } from "../src/index.ts";
 import { createExtensionHarness } from "./harness.ts";
@@ -78,15 +84,74 @@ for (const showPrompt of [true, false]) {
   });
 }
 
-test("registers prefixed flags with defaults and parses them on session start", async () => {
-  const harness = createExtensionHarness({
-    flags: {
-      [FLAG_NAMES.minimumRunSeconds]: "0.5",
-      [FLAG_NAMES.minimumAwaySeconds]: "0",
+test("resolves configuration under Pi's agent directory", () => {
+  assert.equal(configPath(), join(getAgentDir(), "pi-heuristic-notify.json"));
+  assert.equal(
+    configPath("/custom/pi-agent"),
+    join("/custom/pi-agent", "pi-heuristic-notify.json"),
+  );
+});
+
+test("missing configuration uses defaults", async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-heuristic-notify-config-"));
+  try {
+    assert.deepEqual(loadConfig(agentDir), { ok: true, config: DEFAULT_CONFIG });
+  } finally {
+    await rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("loads partial configuration from JSON", async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-heuristic-notify-config-"));
+  try {
+    await writeFile(configPath(agentDir), JSON.stringify({ minimumAwaySeconds: 2.5, showPrompt: false }));
+    assert.deepEqual(loadConfig(agentDir), {
+      ok: true,
+      config: { ...DEFAULT_CONFIG, minimumAwayMs: 2_500, showPrompt: false },
+    });
+  } finally {
+    await rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+for (const [name, contents] of [
+  ["malformed JSON", "{"],
+  ["non-object root", "[]"],
+  ["invalid property", JSON.stringify({ urgency: "urgent" })],
+] as const) {
+  test(`reports the path for ${name}`, async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "pi-heuristic-notify-config-"));
+    const path = configPath(agentDir);
+    try {
+      await writeFile(path, contents);
+      const result = loadConfig(agentDir);
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.error.startsWith(`${path}:`), true);
+    } finally {
+      await rm(agentDir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("loads configuration once when a session starts", async () => {
+  const harness = createExtensionHarness();
+  let reads = 0;
+  heuristicNotify(harness.pi, {
+    loadConfig: () => {
+      reads++;
+      return { ok: true, config: DEFAULT_CONFIG };
     },
   });
 
-  heuristicNotify(harness.pi);
+  assert.equal(reads, 0);
+  await harness.emit("session_start", { type: "session_start", reason: "startup" });
+  assert.equal(reads, 1);
+});
+
+test("still registers prefixed flags pending their removal", async () => {
+  const harness = createExtensionHarness();
+
+  heuristicNotify(harness.pi, { loadConfig: () => ({ ok: true, config: DEFAULT_CONFIG }) });
   await harness.emit("session_start", { type: "session_start", reason: "startup" });
 
   assert.deepEqual([...harness.flags], [
@@ -100,16 +165,16 @@ test("registers prefixed flags with defaults and parses them on session start", 
 });
 
 test("reports invalid configuration and disables delivery", async () => {
-  const harness = createExtensionHarness({
-    flags: { [FLAG_NAMES.urgency]: "loud" },
-  });
+  const harness = createExtensionHarness();
 
-  heuristicNotify(harness.pi);
+  heuristicNotify(harness.pi, {
+    loadConfig: () => ({ ok: false, error: "/agent/pi-heuristic-notify.json: urgency must be low, normal, or critical" }),
+  });
   await harness.emit("session_start", { type: "session_start", reason: "startup" });
 
   assert.deepEqual(harness.notifications, [
     {
-      message: "pi-heuristic-notify disabled: urgency must be low, normal, or critical",
+      message: "pi-heuristic-notify disabled: /agent/pi-heuristic-notify.json: urgency must be low, normal, or critical",
       type: "error",
     },
   ]);

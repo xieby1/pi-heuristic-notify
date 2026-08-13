@@ -3,8 +3,8 @@ import test from "node:test";
 import type { ExecResult } from "@earendil-works/pi-coding-agent";
 import heuristicNotify, {
   captureNiriWindowId,
+  DEFAULT_CONFIG,
   deliverNotification,
-  FLAG_NAMES,
   type NotificationContent,
 } from "../src/index.ts";
 import { createExtensionHarness } from "./harness.ts";
@@ -296,10 +296,6 @@ test("factory captures origin, generates IDs per session, reports failure, and a
   const controllers: AbortSignal[] = [];
   let resolveKitten: ((result: ExecResult) => void) | undefined;
   const harness = createExtensionHarness({
-    flags: {
-      [FLAG_NAMES.minimumRunSeconds]: "0",
-      [FLAG_NAMES.minimumAwaySeconds]: "0",
-    },
     exec: ({ command, options }) => {
       if (command === "kitten") {
         controllers.push(options!.signal!);
@@ -310,6 +306,10 @@ test("factory captures origin, generates IDs per session, reports failure, and a
   });
   const ids = ["first", "second"];
   heuristicNotify(harness.pi, {
+    loadConfig: () => ({
+      ok: true,
+      config: { ...DEFAULT_CONFIG, minimumRunMs: 0, minimumAwayMs: 0 },
+    }),
     env: { KITTY_WINDOW_ID: "42", TMUX_PANE: "%7" },
     platform: "linux",
     randomUUID: () => ids.shift()!,

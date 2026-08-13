@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExecResult } from "@earendil-works/pi-coding-agent";
-import heuristicNotify, { FLAG_NAMES, type NotificationContent } from "../src/index.ts";
+import heuristicNotify, { DEFAULT_CONFIG, type NotificationContent } from "../src/index.ts";
 import { createExtensionHarness } from "./harness.ts";
 
 const success: ExecResult = { stdout: "", stderr: "", code: 0, killed: false };
@@ -9,22 +9,26 @@ const FOCUS_IN = "\x1b[I";
 const FOCUS_OUT = "\x1b[O";
 
 function diagnosticsScenario(options: {
-  minimumRunSeconds?: string;
-  minimumAwaySeconds?: string;
+  minimumRunSeconds?: number;
+  minimumAwaySeconds?: number;
   env?: Record<string, string | undefined>;
   exec?: NonNullable<Parameters<typeof createExtensionHarness>[0]>["exec"];
 } = {}) {
   const harness = createExtensionHarness({
-    flags: {
-      [FLAG_NAMES.minimumRunSeconds]: options.minimumRunSeconds ?? "10",
-      [FLAG_NAMES.minimumAwaySeconds]: options.minimumAwaySeconds ?? "5",
-    },
     ...(options.exec ? { exec: options.exec } : {}),
   });
   const sent: NotificationContent[] = [];
   let now = 0;
   let timer: { at: number; callback: () => void } | undefined;
   heuristicNotify(harness.pi, {
+    loadConfig: () => ({
+      ok: true,
+      config: {
+        ...DEFAULT_CONFIG,
+        minimumRunMs: (options.minimumRunSeconds ?? 10) * 1_000,
+        minimumAwayMs: (options.minimumAwaySeconds ?? 5) * 1_000,
+      },
+    }),
     now: () => now,
     env: options.env ?? {},
     platform: "linux",
@@ -107,8 +111,8 @@ test("notify-check reports config, focus, duration, pending state, backend, and 
 
 test("notify-check reports each major eligibility gate", async () => {
   for (const gate of ["short run", "focused", "waiting for away threshold", "aborted", "eligible"] as const) {
-    const minimumRunSeconds = gate === "short run" ? "10" : "0";
-    const minimumAwaySeconds = gate === "waiting for away threshold" ? "5" : "0";
+    const minimumRunSeconds = gate === "short run" ? 10 : 0;
+    const minimumAwaySeconds = gate === "waiting for away threshold" ? 5 : 0;
     const s = diagnosticsScenario({ minimumRunSeconds, minimumAwaySeconds });
     await startTui(s);
     s.focusOut();
@@ -128,7 +132,7 @@ test("notify-check reports each major eligibility gate", async () => {
 });
 
 test("session start resets diagnostic run state", async () => {
-  const s = diagnosticsScenario({ minimumRunSeconds: "0", minimumAwaySeconds: "0" });
+  const s = diagnosticsScenario({ minimumRunSeconds: 0, minimumAwaySeconds: 0 });
   await startTui(s);
   s.focusOut();
   await s.start();

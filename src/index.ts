@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const ESC = "\x1b";
 const ENABLE_FOCUS_REPORTING = `${ESC}[?1004h`;
@@ -111,6 +112,32 @@ export function parseConfig(values: Record<string, unknown>): ConfigResult {
     ok: true,
     config: { minimumRunMs, minimumAwayMs, urgency, expiryMs, showPrompt },
   };
+}
+
+export function configPath(agentDir = getAgentDir()): string {
+  return join(agentDir, "pi-heuristic-notify.json");
+}
+
+export function loadConfig(agentDir = getAgentDir()): ConfigResult {
+  const path = configPath(agentDir);
+  let contents: string;
+  try {
+    contents = readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { ok: true, config: DEFAULT_CONFIG };
+    return { ok: false, error: `${path}: ${error instanceof Error ? error.message : String(error)}` };
+  }
+
+  try {
+    const values: unknown = JSON.parse(contents);
+    if (typeof values !== "object" || values === null || Array.isArray(values)) {
+      return { ok: false, error: `${path}: configuration must be a JSON object` };
+    }
+    const result = parseConfig(values as Record<string, unknown>);
+    return result.ok ? result : { ok: false, error: `${path}: ${result.error}` };
+  } catch (error) {
+    return { ok: false, error: `${path}: ${error instanceof Error ? error.message : String(error)}` };
+  }
 }
 
 export type EligibleRun = {
@@ -314,6 +341,7 @@ type Runtime = {
   env?: Record<string, string | undefined>;
   platform?: NodeJS.Platform;
   randomUUID?: () => string;
+  loadConfig?: () => ConfigResult;
 };
 
 export default function heuristicNotify(
@@ -467,17 +495,7 @@ export default function heuristicNotify(
     Object.assign(focus, createFocusState());
     sessionIdentifier = `pi-heuristic-notify-session-${(runtime.randomUUID ?? randomUUID)()}`;
     reportError = (message) => ctx.ui.notify(`pi-heuristic-notify: ${message}`, "error");
-    const flagNumber = (name: string) => {
-      const value = pi.getFlag(name);
-      return typeof value === "string" && value.trim() ? Number(value) : value;
-    };
-    const result = parseConfig({
-      minimumRunSeconds: flagNumber(FLAG_NAMES.minimumRunSeconds),
-      minimumAwaySeconds: flagNumber(FLAG_NAMES.minimumAwaySeconds),
-      urgency: pi.getFlag(FLAG_NAMES.urgency),
-      expirySeconds: flagNumber(FLAG_NAMES.expirySeconds),
-      showPrompt: !pi.getFlag(FLAG_NAMES.hidePrompt),
-    });
+    const result = (runtime.loadConfig ?? loadConfig)();
     config = result.ok ? result.config : undefined;
     suppression = result.ok ? "unknown focus" : "invalid config";
     if (!result.ok) ctx.ui.notify(`pi-heuristic-notify disabled: ${result.error}`, "error");
