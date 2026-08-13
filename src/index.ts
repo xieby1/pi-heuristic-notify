@@ -429,6 +429,7 @@ export default function heuristicNotify(
         ? `run >= ${formatDuration(config.minimumRunMs)}; away >= ${formatDuration(config.minimumAwayMs)}; urgency ${config.urgency}; expiry ${formatDuration(config.expiryMs)}; prompt ${config.showPrompt ? "shown" : "hidden"}`
         : "invalid";
       ctx.ui.notify([
+        `Config file: ${configPath()}`,
         `Config: ${configText}`,
         `Focus: terminal events; ${focusState}; away ${awayMs === undefined ? "n/a" : formatDuration(awayMs)}`,
         `Run: ${runDurationMs === undefined ? "n/a" : formatDuration(runDurationMs)}`,

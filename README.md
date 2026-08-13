@@ -27,21 +27,27 @@ Restart Pi after installation, or run `/reload` in an existing session.
 
 ## Configuration
 
-Pass options when starting Pi:
+Create `~/.pi/agent/pi-heuristic-notify.json`:
 
-```text
---notify-minimum-run-seconds <seconds>   Minimum run duration (default: 10)
---notify-minimum-away-seconds <seconds>  Minimum continuous unfocused time (default: 5)
---notify-urgency <level>                  low, normal, or critical (default: normal)
---notify-expiry-seconds <seconds>         Notification lifetime (default: 10)
---notify-hide-prompt                      Omit the last prompt (default: false)
+```json
+{
+  "minimumRunSeconds": 10,
+  "minimumAwaySeconds": 5,
+  "urgency": "normal",
+  "expirySeconds": 10,
+  "showPrompt": true
+}
 ```
 
-Durations may be zero or fractional, but must be finite and non-negative. Invalid configuration reports an error and disables notifications for the session. To disable the extension entirely, remove it from Pi or do not load it.
+Every property is optional; omitted properties use the values shown above. Durations may be zero or fractional, but must be finite and non-negative. `urgency` must be `low`, `normal`, or `critical`, and `showPrompt` must be a boolean.
+
+Pi's `PI_CODING_AGENT_DIR` relocates the file with the rest of the agent configuration. A missing file uses defaults. Invalid JSON or values report an error and disable automatic and test notifications for that session. Run `/reload` after editing the file.
+
+CLI flags, project-local overrides, live file watching, and automatic config generation are not supported. To disable the extension entirely, remove it from Pi or do not load it.
 
 ## Commands
 
-- `/notify-check` reports configuration, focus and away time, run duration, pending delivery, backend, and suppression reason.
+- `/notify-check` reports the resolved configuration path, effective values, focus and away time, run duration, pending delivery, backend, and suppression reason.
 - `/notify-test` sends an immediate test through the selected backend without applying heuristic thresholds. Under niri it watches the notification daemon's action asynchronously and exercises the same niri/Kitty/tmux origin restoration as automatic notifications.
 
 Command and delivery failures are reported in Pi without crashing the session.

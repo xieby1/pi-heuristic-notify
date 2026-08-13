@@ -22,11 +22,11 @@
   - [x] Remove `FLAG_NAMES`, all `registerFlag()` calls, `getFlag()` reads, and command-option parsing.
   - [x] Remove obsolete flag support from the fake `ExtensionAPI` harness if no other test uses it.
 
-- [ ] Update user-facing configuration documentation.
-  - [ ] Replace the CLI option section with the path `~/.pi/agent/pi-heuristic-notify.json`, its JSON shape, defaults, partial override behavior, and `/reload` instructions.
-  - [ ] Document that `PI_CODING_AGENT_DIR` relocates the file, a missing file uses defaults, and invalid configuration disables notifications for the session.
-  - [ ] Document that CLI flags, project-local overrides, live file watching, and automatic config generation are unsupported.
-  - [ ] Update `/notify-check` to report the resolved config path along with the effective values and add a diagnostics assertion for it.
+- [x] Update user-facing configuration documentation.
+  - [x] Replace the CLI option section with the path `~/.pi/agent/pi-heuristic-notify.json`, its JSON shape, defaults, partial override behavior, and `/reload` instructions.
+  - [x] Document that `PI_CODING_AGENT_DIR` relocates the file, a missing file uses defaults, and invalid configuration disables notifications for the session.
+  - [x] Document that CLI flags, project-local overrides, live file watching, and automatic config generation are unsupported.
+  - [x] Update `/notify-check` to report the resolved config path along with the effective values and add a diagnostics assertion for it.
 
 - [ ] Verify the configuration migration.
   - [ ] Run `npm test`, strict typechecking, and the real-loader smoke test.

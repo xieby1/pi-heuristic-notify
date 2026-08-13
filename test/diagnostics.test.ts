@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExecResult } from "@earendil-works/pi-coding-agent";
-import heuristicNotify, { DEFAULT_CONFIG, type NotificationContent } from "../src/index.ts";
+import heuristicNotify, { configPath, DEFAULT_CONFIG, type NotificationContent } from "../src/index.ts";
 import { createExtensionHarness } from "./harness.ts";
 
 const success: ExecResult = { stdout: "", stderr: "", code: 0, killed: false };
@@ -100,6 +100,7 @@ test("notify-check reports config, focus, duration, pending state, backend, and 
   await startTui(s);
 
   assert.equal(await s.check(), [
+    `Config file: ${configPath()}`,
     "Config: run >= 10s; away >= 5s; urgency normal; expiry 10s; prompt shown",
     "Focus: terminal events; unknown; away n/a",
     "Run: n/a",
