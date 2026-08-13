@@ -8,14 +8,14 @@
   - [x] Add a `DefaultResourceLoader` smoke test that loads the real TypeScript entrypoint without starting an agent or model
   - [x] Add a package test that fails if npm runtime dependencies are introduced
 
-- [ ] Define and validate user configuration
-  - [ ] Register package-prefixed native Pi flags for `notify-minimum-run-seconds`, `notify-minimum-away-seconds`, urgency, expiry time, and hiding the prompt
-  - [ ] Use conservative defaults: 10 seconds of work, 5 seconds continuously away, normal urgency, 10-second expiry, and prompt shown
-  - [ ] Parse configuration once per session and reject non-finite, negative, or unsupported values with a visible error
-  - [ ] Document that users can disable the extension by not loading it; do not add another enable switch
-  - [ ] Test defaults and every valid override
-  - [ ] Test exact zero values and fractional seconds
-  - [ ] Test invalid numbers and urgency values disable notification delivery instead of silently changing behavior
+- [x] Define and validate user configuration
+  - [x] Register package-prefixed native Pi flags for `notify-minimum-run-seconds`, `notify-minimum-away-seconds`, urgency, expiry time, and hiding the prompt
+  - [x] Use conservative defaults: 10 seconds of work, 5 seconds continuously away, normal urgency, 10-second expiry, and prompt shown
+  - [x] Parse configuration once per session and reject non-finite, negative, or unsupported values with a visible error
+  - [x] Document that users can disable the extension by not loading it; do not add another enable switch
+  - [x] Test defaults and every valid override
+  - [x] Test exact zero values and fractional seconds
+  - [x] Test invalid numbers and urgency values disable notification delivery instead of silently changing behavior
 
 - [ ] Track continuous terminal focus accurately
   - [ ] Implement a pure scanner for DECSET 1004 `FocusIn` (`ESC [ I`) and `FocusOut` (`ESC [ O`) sequences embedded in terminal input
