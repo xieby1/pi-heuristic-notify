@@ -37,11 +37,23 @@ test("formats durations at millisecond, second, and minute boundaries", () => {
   }
 });
 
-test("builds notification content with prompt, duration, urgency, and expiry", () => {
+test("builds completed notification content with prompt, duration, urgency, and expiry", () => {
   assert.deepEqual(
     buildNotification({ prompt: "  ship\nthis  ", runDurationMs: 12_500, outcome: "complete" }, DEFAULT_CONFIG),
     {
       title: "Pi run complete",
+      body: "Prompt: ship this\nDuration: 12.5s",
+      urgency: "normal",
+      expiryMs: 10_000,
+    },
+  );
+});
+
+test("builds failed notification content with unchanged body and configuration", () => {
+  assert.deepEqual(
+    buildNotification({ prompt: "  ship\nthis  ", runDurationMs: 12_500, outcome: "failed" }, DEFAULT_CONFIG),
+    {
+      title: "Pi run failed",
       body: "Prompt: ship this\nDuration: 12.5s",
       urgency: "normal",
       expiryMs: 10_000,
@@ -101,12 +113,12 @@ test("automatic eligibility emits structured notification content without shell 
   now = 1_500;
   await harness.emit("agent_end", {
     type: "agent_end",
-    messages: [{ role: "assistant", stopReason: "stop" }],
+    messages: [{ role: "assistant", stopReason: "error" }],
   });
   await harness.emit("agent_settled", { type: "agent_settled" });
 
   assert.deepEqual(notifications, [{
-    title: "Pi run complete",
+    title: "Pi run failed",
     body: "Prompt: inspect logs\nDuration: 1.5s",
     urgency: "critical",
     expiryMs: 2_500,

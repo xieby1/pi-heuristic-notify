@@ -8,10 +8,10 @@
   - [x] Add a failing lifecycle test that aborted and interrupted runs remain suppressed.
   - [x] Add the smallest outcome field to `EligibleRun` and derive it from the final assistant stop reason; do not listen for individual tool failures.
 
-- [ ] Present failed runs distinctly.
-  - [ ] Add failing content tests that completed runs use `Pi run complete` and failed runs use `Pi run failed`.
-  - [ ] Keep prompt, duration, urgency, expiry, and `showPrompt` behavior identical for both outcomes.
-  - [ ] Pass the classified outcome through automatic delivery without adding a configuration option or separate delivery path.
+- [x] Present failed runs distinctly.
+  - [x] Add failing content tests that completed runs use `Pi run complete` and failed runs use `Pi run failed`.
+  - [x] Keep prompt, duration, urgency, expiry, and `showPrompt` behavior identical for both outcomes.
+  - [x] Pass the classified outcome through automatic delivery without adding a configuration option or separate delivery path.
 
 - [ ] Document and verify failed-run notifications.
   - [ ] Document that only final settled failures are eligible; intermediate tool/agent errors, retries, aborts, and interrupted runs do not notify as failures.

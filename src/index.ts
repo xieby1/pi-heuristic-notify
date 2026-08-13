@@ -318,7 +318,7 @@ export function buildNotification(run: EligibleRun, config: NotifyConfig): Notif
   const duration = `Duration: ${formatDuration(run.runDurationMs)}`;
   const prompt = sanitizePrompt(run.prompt) || "No prompt";
   return {
-    title: "Pi run complete",
+    title: run.outcome === "failed" ? "Pi run failed" : "Pi run complete",
     body: config.showPrompt ? `Prompt: ${prompt}\n${duration}` : duration,
     urgency: config.urgency,
     expiryMs: config.expiryMs,
