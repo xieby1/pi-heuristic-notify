@@ -328,7 +328,6 @@ export function buildNotification(run: EligibleRun, config: NotifyConfig): Notif
 type Runtime = {
   now?: () => number;
   writeTerminal?: (data: string) => void;
-  onEligible?: (run: EligibleRun) => void | Promise<void>;
   notify?: (notification: NotificationContent) => void | Promise<void>;
   schedule?: (delayMs: number, callback: () => void) => () => void;
   env?: Record<string, string | undefined>;
@@ -556,7 +555,6 @@ export default function heuristicNotify(
     };
     const deliver = () => {
       suppression = "eligible";
-      void runtime.onEligible?.(candidate);
       void notify(buildNotification(candidate, settledConfig));
     };
     if (awayMs >= minimumAwayMs) {

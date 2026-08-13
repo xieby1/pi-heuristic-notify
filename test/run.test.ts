@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import heuristicNotify, { DEFAULT_CONFIG, type EligibleRun } from "../src/index.ts";
+import heuristicNotify, { DEFAULT_CONFIG, type NotificationContent } from "../src/index.ts";
 import { createExtensionHarness } from "./harness.ts";
 
 const FOCUS_IN = "\x1b[I";
@@ -8,7 +8,7 @@ const FOCUS_OUT = "\x1b[O";
 
 function scenario(minimumRunSeconds = 10, minimumAwaySeconds = 5) {
   const harness = createExtensionHarness();
-  const eligible: EligibleRun[] = [];
+  const sent: NotificationContent[] = [];
   let now = 0;
   let timer: { at: number; callback: () => void } | undefined;
   heuristicNotify(harness.pi, {
@@ -22,7 +22,7 @@ function scenario(minimumRunSeconds = 10, minimumAwaySeconds = 5) {
     }),
     now: () => now,
     writeTerminal: () => {},
-    onEligible: (run) => { eligible.push(run); },
+    notify: (notification) => { sent.push(notification); },
     schedule: (delayMs, callback) => {
       timer = { at: now + delayMs, callback };
       return () => { timer = undefined; };
@@ -31,7 +31,7 @@ function scenario(minimumRunSeconds = 10, minimumAwaySeconds = 5) {
 
   return {
     harness,
-    eligible,
+    sent,
     setNow(value: number) { now = value; },
     get timerAt() { return timer?.at; },
     runTimer() {
@@ -83,7 +83,7 @@ test("requires both thresholds at their exact boundaries", async () => {
     s.setNow(runMs);
     await s.end();
     await s.settle();
-    assert.equal(s.eligible.length > 0, expected, `run=${runMs} away=${awayMs}`);
+    assert.equal(s.sent.length > 0, expected, `run=${runMs} away=${awayMs}`);
   }
 });
 
@@ -94,15 +94,12 @@ test("a final error becomes eligible only after agent_settled", async () => {
   await s.start("failing prompt");
   s.setNow(10_000);
   await s.end("error");
-  assert.deepEqual(s.eligible, []);
+  assert.equal(s.sent.length, 0);
 
   await s.settle();
 
-  assert.deepEqual(s.eligible, [{
-    prompt: "failing prompt",
-    runDurationMs: 10_000,
-    outcome: "failed",
-  }]);
+  assert.equal(s.sent[0]?.title, "Pi run failed");
+  assert.equal(s.sent[0]?.body, "Prompt: failing prompt\nDuration: 10s");
 });
 
 test("the final agent end determines the settled outcome", async () => {
@@ -112,19 +109,16 @@ test("the final agent end determines the settled outcome", async () => {
   await s.start("first prompt");
   s.setNow(4_000);
   await s.end("error");
-  assert.deepEqual(s.eligible, []);
+  assert.equal(s.sent.length, 0);
 
   await s.start("queued follow-up");
   s.setNow(10_000);
   await s.end("stop");
-  assert.deepEqual(s.eligible, []);
+  assert.equal(s.sent.length, 0);
   await s.settle();
 
-  assert.deepEqual(s.eligible, [{
-    prompt: "queued follow-up",
-    runDurationMs: 10_000,
-    outcome: "complete",
-  }]);
+  assert.equal(s.sent[0]?.title, "Pi run complete");
+  assert.equal(s.sent[0]?.body, "Prompt: queued follow-up\nDuration: 10s");
 });
 
 test("delays until the remaining continuous-away threshold", async () => {
@@ -137,18 +131,14 @@ test("delays until the remaining continuous-away threshold", async () => {
   await s.end();
   await s.settle();
 
-  assert.deepEqual(s.eligible, []);
+  assert.equal(s.sent.length, 0);
   assert.equal(s.timerAt, 13_000);
   s.setNow(12_999);
   s.runTimer();
-  assert.deepEqual(s.eligible, []);
+  assert.equal(s.sent.length, 0);
   s.setNow(13_000);
   s.runTimer();
-  assert.deepEqual(s.eligible, [{
-    prompt: "latest prompt",
-    runDurationMs: 10_000,
-    outcome: "complete",
-  }]);
+  assert.equal(s.sent[0]?.body, "Prompt: latest prompt\nDuration: 10s");
 });
 
 test("focused, unknown, short, aborted, and interrupted completions stay silent", async () => {
@@ -161,7 +151,7 @@ test("focused, unknown, short, aborted, and interrupted completions stay silent"
     s.setNow(mode === "short" ? 9_999 : 10_000);
     if (mode !== "interrupted") await s.end(mode === "aborted" ? "aborted" : "stop");
     await s.settle();
-    assert.deepEqual(s.eligible, [], mode);
+    assert.equal(s.sent.length, 0, mode);
     assert.equal(s.timerAt, undefined, mode);
   }
 });
@@ -184,7 +174,7 @@ test("refocus cancels delayed eligibility and a later FocusOut does not revive i
     s.harness.sendTerminalInput(FOCUS_OUT);
     s.setNow(20_000);
     s.runTimer();
-    assert.deepEqual(s.eligible, []);
+    assert.equal(s.sent.length, 0);
   }
 });
 
@@ -215,9 +205,6 @@ test("each settled run emits at most once and resets state", async () => {
   await s.end();
   await s.settle();
   await s.settle();
-  assert.deepEqual(s.eligible, [{
-    prompt: "one",
-    runDurationMs: 10_000,
-    outcome: "complete",
-  }]);
+  assert.equal(s.sent.length, 1);
+  assert.equal(s.sent[0]?.body, "Prompt: one\nDuration: 10s");
 });
