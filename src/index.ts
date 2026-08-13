@@ -1,4 +1,5 @@
 import { writeFileSync } from "node:fs";
+import { stripVTControlCharacters } from "node:util";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const ESC = "\x1b";
@@ -138,10 +139,48 @@ export type EligibleRun = {
   runDurationMs: number;
 };
 
+export type NotificationContent = {
+  title: string;
+  body: string;
+  urgency: NotificationUrgency;
+  expiryMs: number;
+};
+
+export function sanitizePrompt(prompt: string, maxCodePoints = 160): string {
+  const normalized = stripVTControlCharacters(prompt)
+    .replace(/[\x00-\x1f\x7f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const characters = Array.from(normalized);
+  return characters.length <= maxCodePoints
+    ? normalized
+    : `${characters.slice(0, maxCodePoints - 3).join("")}...`;
+}
+
+export function formatDuration(durationMs: number): string {
+  if (durationMs < 1_000) return `${durationMs}ms`;
+  if (durationMs < 60_000) return `${Math.floor(durationMs / 100) / 10}s`;
+  const minutes = Math.floor(durationMs / 60_000);
+  const seconds = Math.floor((durationMs % 60_000) / 1_000);
+  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+export function buildNotification(run: EligibleRun, config: NotifyConfig): NotificationContent {
+  const duration = `Duration: ${formatDuration(run.runDurationMs)}`;
+  const prompt = sanitizePrompt(run.prompt) || "No prompt";
+  return {
+    title: "Pi run complete",
+    body: config.showPrompt ? `Prompt: ${prompt}\n${duration}` : duration,
+    urgency: config.urgency,
+    expiryMs: config.expiryMs,
+  };
+}
+
 type Runtime = {
   now?: () => number;
   writeTerminal?: (data: string) => void;
   onEligible?: (run: EligibleRun) => void | Promise<void>;
+  notify?: (notification: NotificationContent) => void | Promise<void>;
   schedule?: (delayMs: number, callback: () => void) => () => void;
 };
 
@@ -226,15 +265,20 @@ export default function heuristicNotify(
     resetRun();
 
     if (!config || startedAt === undefined || !ended || finalStopReason === "aborted") return;
+    const settledConfig = config;
     const runDurationMs = settledAt - startedAt;
-    if (runDurationMs < config.minimumRunMs) return;
+    if (runDurationMs < settledConfig.minimumRunMs) return;
     const awayMs = continuousAwayMs(focus, settledAt);
     if (awayMs === undefined) return;
 
-    const minimumAwayMs = config.minimumAwayMs;
+    const minimumAwayMs = settledConfig.minimumAwayMs;
     const candidate = { prompt: settledPrompt, runDurationMs };
-    if (awayMs >= minimumAwayMs) {
+    const deliver = () => {
       void runtime.onEligible?.(candidate);
+      void runtime.notify?.(buildNotification(candidate, settledConfig));
+    };
+    if (awayMs >= minimumAwayMs) {
+      deliver();
       return;
     }
 
@@ -242,7 +286,7 @@ export default function heuristicNotify(
       cancelPending = undefined;
       const currentAwayMs = continuousAwayMs(focus, now());
       if (currentAwayMs !== undefined && currentAwayMs >= minimumAwayMs) {
-        void runtime.onEligible?.(candidate);
+        deliver();
       }
     });
   });

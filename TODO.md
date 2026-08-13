@@ -53,15 +53,15 @@
   - [x] Test a new run and session shutdown cancel a pending notification
   - [x] Use an injected clock and scheduler in all timing tests; use no real sleeps
 
-- [ ] Build safe notification content
-  - [ ] Include the last user prompt and measured run duration in every automatic notification
-  - [ ] Normalize whitespace, remove terminal/control characters, and truncate long prompts by Unicode code points
-  - [ ] Provide a neutral fallback when the prompt is empty and honor the hide-prompt option
-  - [ ] Format durations consistently across milliseconds, seconds, and minutes
-  - [ ] Pass notification text as argument arrays, never through a shell command string
-  - [ ] Test prompt extraction, empty prompts, multiline prompts, Unicode truncation, and control-character removal
-  - [ ] Test duration formatting at unit boundaries
-  - [ ] Test the hide-prompt option still shows run duration
+- [x] Build safe notification content
+  - [x] Include the last user prompt and measured run duration in every automatic notification
+  - [x] Normalize whitespace, remove terminal/control characters, and truncate long prompts by Unicode code points
+  - [x] Provide a neutral fallback when the prompt is empty and honor the hide-prompt option
+  - [x] Format durations consistently across milliseconds, seconds, and minutes
+  - [x] Pass notification text as argument arrays, never through a shell command string
+  - [x] Test prompt extraction, empty prompts, multiline prompts, Unicode truncation, and control-character removal
+  - [x] Test duration formatting at unit boundaries
+  - [x] Test the hide-prompt option still shows run duration
 
 - [ ] Deliver notifications and restore the exact origin where supported
   - [ ] Capture the originating Kitty window and tmux pane identifiers per extension instance
