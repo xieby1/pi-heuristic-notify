@@ -1,6 +1,6 @@
 # pi-heuristic-notify
 
-> **Archived — development moved into my personal Nix configuration.**
+> **Development moved into my personal Nix configuration.**
 > The maintained source, tests, and Home Manager module live in
 > [xieby1/nix_config](https://github.com/xieby1/nix_config), under
 > `usr/cli/basic/pi/extensions/heuristic-notify/`.
