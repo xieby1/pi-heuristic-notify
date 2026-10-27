@@ -1,5 +1,12 @@
 # pi-heuristic-notify
 
+> **Archived — development moved into my personal Nix configuration.**
+> The maintained source, tests, and Home Manager module live in
+> [xieby1/nix_config](https://github.com/xieby1/nix_config), under
+> `usr/cli/basic/pi/extensions/heuristic-notify/`.
+> This repository is retained for its history and existing pinned revisions;
+> the documentation below describes the standalone version.
+
 Pi extension that sends a desktop notification only after Pi fully settles and both conditions hold:
 
 ```text
