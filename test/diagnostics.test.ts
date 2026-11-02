@@ -18,6 +18,7 @@ function diagnosticsScenario(options: {
     ...(options.exec ? { exec: options.exec } : {}),
   });
   const sent: NotificationContent[] = [];
+  const writes: string[] = [];
   let now = 0;
   let timer: { at: number; callback: () => void } | undefined;
   heuristicNotify(harness.pi, {
@@ -32,8 +33,7 @@ function diagnosticsScenario(options: {
     now: () => now,
     env: options.env ?? {},
     platform: "linux",
-    randomUUID: () => "diagnostic-id",
-    writeTerminal: () => {},
+    writeTerminal: (data) => { writes.push(data); },
     notify: (notification) => { sent.push(notification); },
     schedule: (delayMs, callback) => {
       timer = { at: now + delayMs, callback };
@@ -44,6 +44,7 @@ function diagnosticsScenario(options: {
   return {
     harness,
     sent,
+    writes,
     setNow(value: number) { now = value; },
     focusIn() { harness.sendTerminalInput(FOCUS_IN); },
     focusOut() { harness.sendTerminalInput(FOCUS_OUT); },
@@ -79,7 +80,7 @@ async function startTui(s: ReturnType<typeof diagnosticsScenario>) {
 }
 
 test("notify-check reports config, focus, duration, pending state, backend, and unknown focus", async () => {
-  const s = diagnosticsScenario({ env: { KITTY_WINDOW_ID: "42", TMUX_PANE: "%7" } });
+  const s = diagnosticsScenario({ env: { TERM_PROGRAM: "ghostty" } });
   await startTui(s);
 
   assert.equal(await s.check(), [
@@ -88,7 +89,7 @@ test("notify-check reports config, focus, duration, pending state, backend, and 
     "Focus: terminal events; unknown; away n/a",
     "Run: n/a",
     "Pending delivery: no",
-    "Backend: Kitty + tmux pane %7",
+    "Backend: Ghostty OSC 777",
     "Suppression: unknown focus",
   ].join("\n"));
 });
@@ -133,104 +134,29 @@ test("session start resets diagnostic run state", async () => {
   assert.match(await s.check(), /Focus: terminal events; unknown; away n\/a[\s\S]*Run: n\/a[\s\S]*Suppression: unknown focus$/);
 });
 
-test("notify-test retries niri origin capture before sending", async () => {
-  let captureAttempts = 0;
-  let resolveAction: ((result: ExecResult) => void) | undefined;
-  const s = diagnosticsScenario({
-    env: {
-      KITTY_PID: "493513",
-      KITTY_WINDOW_ID: "42",
-      NIRI_SOCKET: "/run/user/1000/niri.sock",
-    },
-    exec: ({ command, args }) => {
-      if (command === "niri" && args.includes("focused-window")) {
-        captureAttempts++;
-        return {
-          ...success,
-          stdout: JSON.stringify(captureAttempts === 1
-            ? { id: 129, app_id: "kitty", pid: 101_699 }
-            : { id: 162, app_id: "kitty", pid: 493_513 }),
-        };
-      }
-      if (command === "notify-send") return new Promise((resolve) => { resolveAction = resolve; });
-      return success;
-    },
-  });
+test("notify-test writes to the Ghostty surface", async () => {
+  const s = diagnosticsScenario({ env: { TERM_PROGRAM: "ghostty" } });
   await startTui(s);
-  await new Promise<void>((resolve) => setImmediate(resolve));
-
   await s.harness.runCommand("notify-test");
-  assert.equal(captureAttempts, 2);
-
-  resolveAction!({ ...success, stdout: "default\n" });
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(
-    s.harness.execCalls.some(({ command, args }) => command === "niri" && args.includes("focus-window")),
-    true,
-  );
+  assert.equal(s.writes.at(-1), "\x1b]777;notify;Pi notification test;Desktop notifications are working.\x07");
+  assert.deepEqual(s.harness.execCalls, []);
+  assert.equal(s.harness.notifications.at(-1)?.message, "Test sequence written; Ghostty may suppress the notification");
 });
 
-test("notify-test watches the DMS action without blocking the command", async () => {
-  let resolveAction: ((result: ExecResult) => void) | undefined;
-  const s = diagnosticsScenario({
-    env: {
-      KITTY_PID: "493513",
-      KITTY_WINDOW_ID: "42",
-      NIRI_SOCKET: "/run/user/1000/niri.sock",
-    },
-    exec: ({ command, args }) => {
-      if (command === "niri" && args.includes("focused-window")) {
-        return { ...success, stdout: JSON.stringify({ id: 162, app_id: "kitty", pid: 493_513 }) };
-      }
-      if (command === "notify-send") {
-        return new Promise((resolve) => { resolveAction = resolve; });
-      }
-      return success;
-    },
-  });
-  await startTui(s);
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  s.harness.execCalls.length = 0;
-
-  let commandDone = false;
-  const command = s.harness.runCommand("notify-test").then(() => { commandDone = true; });
-  await new Promise<void>((resolve) => setImmediate(resolve));
-
-  assert.equal(commandDone, true);
-  assert.equal(s.harness.execCalls[0]?.command, "notify-send");
-  assert.equal(s.harness.execCalls[0]?.args.includes("--action=default=Open"), true);
-  assert.equal(s.harness.notifications.at(-1)?.message, "Test notification sent");
-
-  resolveAction!({ ...success, stdout: "default\n" });
-  await command;
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.deepEqual(s.harness.execCalls.slice(1).map(({ command, args }) => ({ command, args })), [
-    { command: "niri", args: ["msg", "action", "focus-window", "--id", "162"] },
-    { command: "kitten", args: ["@", "focus-window", "--match", "id:42"] },
-    { command: "niri", args: ["msg", "--json", "focused-window"] },
-  ]);
-});
-
-test("notify-test reports eventual backend success and failure without throwing", async () => {
+test("notify-test reports fallback success and failure", async () => {
   for (const outcome of ["success", "failure"] as const) {
     const s = diagnosticsScenario({
-      env: { KITTY_WINDOW_ID: "42" },
+      env: {},
       exec: ({ command }) => outcome === "success"
         ? success
         : { ...success, code: 1, stderr: `${command} failed` },
     });
     await startTui(s);
-
     await s.harness.runCommand("notify-test");
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
     const last = s.harness.notifications.at(-1)!;
     assert.equal(last.type, outcome === "success" ? "info" : "error");
-    assert.match(
-      last.message,
-      outcome === "success"
-        ? /Test notification sent/
-        : /Test notification failed: kitten notify: kitten failed; notify-send: notify-send failed/,
-    );
+    assert.match(last.message, outcome === "success"
+      ? /Test notification sent/
+      : /Test notification failed: notify-send: notify-send failed/);
   }
 });

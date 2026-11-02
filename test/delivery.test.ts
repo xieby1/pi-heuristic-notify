@@ -1,12 +1,8 @@
+import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExecResult } from "@earendil-works/pi-coding-agent";
-import heuristicNotify, {
-  captureNiriWindowId,
-  DEFAULT_CONFIG,
-  deliverNotification,
-  type NotificationContent,
-} from "../src/index.ts";
+import heuristicNotify, { DEFAULT_CONFIG, deliverNotification, type NotificationContent } from "../src/index.ts";
 import { createExtensionHarness } from "./harness.ts";
 
 const notification: NotificationContent = {
@@ -16,471 +12,129 @@ const notification: NotificationContent = {
   expiryMs: 2_500,
 };
 const success: ExecResult = { stdout: "", stderr: "", code: 0, killed: false };
+const osc = "\x1b]777;notify;Pi run complete;Prompt: inspect logs | Duration: 12.5s\x07";
 
 async function flush(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-test("niri capture accepts only the originating Kitty process", async () => {
-  for (const [focusedWindow, expected] of [
-    [{ id: 162, app_id: "kitty", pid: 493_513 }, 162],
-    [{ id: 162, app_id: "firefox", pid: 493_513 }, undefined],
-    [{ id: 162, app_id: "kitty", pid: 1 }, undefined],
-    [{ id: "162", app_id: "kitty", pid: 493_513 }, undefined],
-  ] as const) {
-    const harness = createExtensionHarness({
-      exec: () => ({ ...success, stdout: JSON.stringify(focusedWindow) }),
-    });
-
-    assert.equal(
-      await captureNiriWindowId(harness.pi, "493513", new AbortController().signal),
-      expected,
-    );
-    assert.deepEqual(harness.execCalls[0]?.args, ["msg", "--json", "focused-window"]);
-  }
-});
-
-test("niri capture ignores unavailable IPC, malformed output, and failed identity checks", async () => {
-  for (const exec of [
-    () => { throw new Error("niri unavailable"); },
-    () => ({ ...success, stdout: "not json" }),
-    () => ({ ...success, code: 1, stderr: "IPC failed" }),
-  ]) {
-    const harness = createExtensionHarness({ exec });
-    assert.equal(
-      await captureNiriWindowId(harness.pi, "493513", new AbortController().signal),
-      undefined,
-    );
-  }
-});
-
-test("niri delivery observes the DMS action and restores window, Kitty tab, then tmux pane", async () => {
-  const harness = createExtensionHarness({
-    exec: ({ command, args }) => command === "notify-send"
-      ? { ...success, stdout: "default\n" }
-      : command === "niri" && args.includes("focused-window")
-        ? { ...success, stdout: JSON.stringify({ id: 162 }) }
-        : success,
-  });
-
-  assert.deepEqual(
-    await deliverNotification(
-      harness.pi,
-      notification,
-      { kittyWindowId: "42", niriWindowId: 162, tmuxPane: "%7" },
-      "session-id",
-      new AbortController().signal,
-      "linux",
-    ),
-    { ok: true },
-  );
-  assert.deepEqual(harness.execCalls.map(({ command, args }) => ({ command, args })), [
-    { command: "notify-send", args: [
-      "--app-name=Pi",
-      "--icon=system-monitor",
-      "--urgency=critical",
-      "--expire-time=2500",
-      "--action=default=Open",
-      "Pi run complete",
-      "Prompt: inspect logs\nDuration: 12.5s",
-    ] },
-    { command: "niri", args: ["msg", "action", "focus-window", "--id", "162"] },
-    { command: "kitten", args: ["@", "focus-window", "--match", "id:42"] },
-    { command: "tmux", args: ["select-pane", "-t", "%7"] },
-    { command: "niri", args: ["msg", "--json", "focused-window"] },
-  ]);
-});
-
-test("niri retries when focus command succeeds but the originating workspace stays inactive", async () => {
-  let attempts = 0;
-  const harness = createExtensionHarness({
-    exec: ({ command, args }) => {
-      if (command === "notify-send") return { ...success, stdout: "default\n" };
-      if (command === "niri" && args.includes("focus-window")) attempts++;
-      if (command === "niri" && args.includes("focused-window")) {
-        return { ...success, stdout: JSON.stringify({ id: attempts < 2 ? 60 : 162 }) };
-      }
-      return success;
-    },
-  });
-
-  assert.deepEqual(
-    await deliverNotification(
-      harness.pi, notification, { kittyWindowId: "42", niriWindowId: 162 },
-      "session-id", new AbortController().signal, "linux", async () => {},
-    ),
-    { ok: true },
-  );
-  assert.equal(attempts, 2);
-  assert.equal(harness.execCalls.at(-1)?.args.includes("focused-window"), true);
-});
-
-test("niri does not retry after focus changes during the wait", async () => {
-  for (const [afterWait, expected] of [
-    [162, { ok: true }],
-    [90, { ok: false, error: "niri: focus changed before retry" }],
-  ] as const) {
-    let focusedId = 60;
-    let attempts = 0;
-    const harness = createExtensionHarness({
-      exec: ({ command, args }) => {
-        if (command === "notify-send") return { ...success, stdout: "default\n" };
-        if (command === "niri" && args.includes("focus-window")) {
-          attempts++;
-          if (attempts > 1) focusedId = 162;
-        }
-        if (command === "niri" && args.includes("focused-window")) {
-          return { ...success, stdout: JSON.stringify({ id: focusedId }) };
-        }
-        return success;
-      },
-    });
-    assert.deepEqual(
-      await deliverNotification(
-        harness.pi, notification, { kittyWindowId: "42", niriWindowId: 162 },
-        "session-id", new AbortController().signal, "linux", async () => { focusedId = afterWait; },
-      ),
-      expected,
-    );
-    assert.equal(attempts, 1);
-  }
-});
-
-test("niri still restores the OS window when Kitty focus fails", async () => {
-  let focusAttempts = 0;
-  const harness = createExtensionHarness({
-    exec: ({ command, args }) => {
-      if (command === "notify-send") return { ...success, stdout: "default\n" };
-      if (command === "kitten") return { ...success, code: 1, stderr: "remote unavailable" };
-      if (command === "niri" && args.includes("focus-window")) focusAttempts++;
-      if (command === "niri" && args.includes("focused-window")) {
-        return { ...success, stdout: JSON.stringify({ id: focusAttempts < 2 ? 60 : 162 }) };
-      }
-      return success;
-    },
-  });
-  assert.deepEqual(
-    await deliverNotification(
-      harness.pi, notification, { kittyWindowId: "42", niriWindowId: 162 },
-      "session-id", new AbortController().signal, "linux", async () => {},
-    ),
-    { ok: false, error: "kitten: remote unavailable" },
-  );
-  assert.equal(focusAttempts, 2);
-});
-
-test("niri reports a successful focus command that never reaches the originating window", async () => {
-  const harness = createExtensionHarness({
-    exec: ({ command, args }) => command === "notify-send"
-      ? { ...success, stdout: "default\n" }
-      : command === "niri" && args.includes("focused-window")
-        ? { ...success, stdout: JSON.stringify({ id: 60 }) }
-        : success,
-  });
-  assert.deepEqual(
-    await deliverNotification(
-      harness.pi, notification, { kittyWindowId: "42", niriWindowId: 162 },
-      "session-id", new AbortController().signal, "linux", async () => {},
-    ),
-    { ok: false, error: "niri: focus-window did not focus window 162" },
-  );
-  assert.equal(harness.execCalls.filter(({ args }) => args.includes("focus-window") && args[0] === "msg").length, 2);
-});
-
-test("aborting a pending niri retry does not focus a window", async () => {
-  const controller = new AbortController();
-  const harness = createExtensionHarness({
-    exec: ({ command, args }) => command === "notify-send"
-      ? { ...success, stdout: "default\n" }
-      : command === "niri" && args.includes("focused-window")
-        ? { ...success, stdout: JSON.stringify({ id: 60 }) }
-        : success,
-  });
-  const result = await deliverNotification(
-    harness.pi, notification, { kittyWindowId: "42", niriWindowId: 162 },
-    "session-id", controller.signal, "linux", async () => { controller.abort(); },
-  );
-  assert.deepEqual(result, { ok: false, aborted: true });
-  assert.equal(harness.execCalls.filter(({ command, args }) => command === "niri" && args.includes("focus-window")).length, 1);
-});
-
-test("niri verification errors identify the failing command", async () => {
-  const harness = createExtensionHarness({
-    exec: ({ command, args }) => command === "notify-send"
-      ? { ...success, stdout: "default\n" }
-      : command === "niri" && args.includes("focused-window")
-        ? { ...success, code: 1, stderr: "IPC failed" }
-        : success,
-  });
-  const result = await deliverNotification(
-    harness.pi, notification, { kittyWindowId: "42", niriWindowId: 162 },
-    "session-id", new AbortController().signal, "linux", async () => {},
-  );
-  assert.deepEqual(result, { ok: false, error: "niri focused-window: IPC failed" });
-});
-
-test("niri delivery failures remain non-fatal and never focus another window", async () => {
-  for (const failure of ["notify-send", "niri", "kitten"] as const) {
-    const harness = createExtensionHarness({
-      exec: ({ command, args }) => {
-        if (command === "notify-send") {
-          return failure === command
-            ? { ...success, code: 1, stderr: "notification failed" }
-            : { ...success, stdout: "default\n" };
-        }
-        if (command === "niri" && args.includes("focused-window")) {
-          return { ...success, stdout: JSON.stringify({ id: 162 }) };
-        }
-        return command === failure
-          ? { ...success, code: 1, stderr: `${command} failed` }
-          : success;
-      },
-    });
-
-    const result = await deliverNotification(
-      harness.pi,
-      notification,
-      { kittyWindowId: "42", niriWindowId: 162, tmuxPane: "%7" },
-      "session-id",
-      new AbortController().signal,
-      "linux",
-    );
-
-    assert.equal(result.ok, false);
-    assert.equal(
-      harness.execCalls.some(({ command }) => command === "tmux"),
-      failure !== "notify-send",
-    );
-    assert.equal(
-      harness.execCalls.filter(({ command }) => command === "niri").length,
-      failure === "notify-send" ? 0 : 2,
-    );
-  }
-});
-
-test("factory resolves the niri origin at session start without polling", async () => {
-  const harness = createExtensionHarness({
-    exec: ({ command }) => command === "niri"
-      ? { ...success, stdout: JSON.stringify({ id: 162, app_id: "kitty", pid: 493_513 }) }
-      : success,
-  });
-  heuristicNotify(harness.pi, {
-    env: {
-      KITTY_PID: "493513",
-      KITTY_WINDOW_ID: "42",
-      NIRI_SOCKET: "/run/user/1000/niri.sock",
-    },
-    writeTerminal: () => {},
-  });
-
-  assert.equal(harness.execCalls.length, 0);
-  await harness.emit("session_start", { type: "session_start", reason: "startup" }, { mode: "tui" });
-  await flush();
-  assert.deepEqual(harness.execCalls.map(({ command, args }) => ({ command, args })), [
-    { command: "niri", args: ["msg", "--json", "focused-window"] },
-  ]);
-});
-
-test("Kitty receives structured arguments and a unique session identifier", async () => {
+test("Ghostty notifies the originating surface without running an external command", async () => {
   const harness = createExtensionHarness();
-
+  const written: string[] = [];
   assert.deepEqual(
-    await deliverNotification(
-      harness.pi,
-      notification,
-      { kittyWindowId: "42" },
-      "pi-heuristic-notify-session-1",
-      new AbortController().signal,
-      "linux",
-    ),
+    await deliverNotification(harness.pi, notification, { ghostty: true }, new AbortController().signal, "linux", (data) => written.push(data)),
     { ok: true },
   );
-  assert.deepEqual(harness.execCalls.map(({ command, args }) => ({ command, args })), [{
-    command: "kitten",
-    args: [
-      "notify",
-      "--app-name=Pi",
-      "--icon=system-monitor",
-      "--urgency=critical",
-      "--expire-after=2.5s",
-      "--identifier=pi-heuristic-notify-session-1",
-      "--wait-for-completion",
-      "Pi run complete",
-      "Prompt: inspect logs\nDuration: 12.5s",
-    ],
-  }]);
-  assert.ok(harness.execCalls[0]?.options?.signal);
+  assert.deepEqual(written, [osc]);
+  assert.deepEqual(harness.execCalls, []);
 });
 
-test("Kitty failure falls back to notify-send without fallback after success", async () => {
-  for (const kittyCode of [0, 1]) {
-    const harness = createExtensionHarness({
-      exec: ({ command }) => command === "kitten"
-        ? { ...success, code: kittyCode, stderr: kittyCode ? "kitty failed" : "" }
-        : success,
-    });
-
-    const result = await deliverNotification(
-      harness.pi,
-      notification,
-      { kittyWindowId: "42" },
-      "session-id",
-      new AbortController().signal,
-      "linux",
-    );
-
-    assert.equal(result.ok, true);
-    assert.deepEqual(
-      harness.execCalls.map(({ command }) => command),
-      kittyCode === 0 ? ["kitten"] : ["kitten", "notify-send"],
-    );
-    if (kittyCode !== 0) {
-      assert.deepEqual(harness.execCalls[1]?.args, [
-        "--app-name=Pi",
-        "--icon=system-monitor",
-        "--urgency=critical",
-        "--expire-time=2500",
-        "Pi run complete",
-        "Prompt: inspect logs\nDuration: 12.5s",
-      ]);
-    }
-  }
+test("OSC fields cannot inject another terminal command", async () => {
+  const harness = createExtensionHarness();
+  const written: string[] = [];
+  const hostile = { ...notification, title: "Hi;\x07\x1b]9;bad", body: "Prompt; hi\x07\x1b]9;bad\nDuration: 1s" };
+  await deliverNotification(harness.pi, hostile, { ghostty: true }, new AbortController().signal, "linux", (data) => written.push(data));
+  assert.deepEqual(written, ["\x1b]777;notify;Hi   ]9 bad;Prompt; hi  ]9;bad | Duration: 1s\x07"]);
 });
 
-test("tmux selects the captured pane only after Kitty activation", async () => {
-  for (const activation of ["0\n", ""] as const) {
-    const harness = createExtensionHarness({
-      exec: ({ command }) => command === "kitten" ? { ...success, stdout: activation } : success,
-    });
-
-    const result = await deliverNotification(
-      harness.pi,
-      notification,
-      { kittyWindowId: "42", tmuxPane: "%7" },
-      "session-id",
-      new AbortController().signal,
-      "linux",
-    );
-
-    assert.deepEqual(
-      harness.execCalls.map(({ command, args }) => ({ command, args })),
-      activation
-        ? [
-            { command: "kitten", args: harness.execCalls[0]!.args },
-            { command: "tmux", args: ["select-pane", "-t", "%7"] },
-          ]
-        : [{ command: "kitten", args: harness.execCalls[0]!.args }],
-    );
-    assert.deepEqual(result, { ok: true });
-  }
-});
-
-test("tmux selection failure after activation does not send a duplicate fallback", async () => {
-  const harness = createExtensionHarness({
-    exec: ({ command }) => {
-      if (command === "kitten") return { ...success, stdout: "0\n" };
-      if (command === "tmux") throw new Error("tmux unavailable");
-      return success;
-    },
-  });
-
-  const result = await deliverNotification(
-    harness.pi,
-    notification,
-    { kittyWindowId: "42", tmuxPane: "%7" },
-    "session-id",
-    new AbortController().signal,
-    "linux",
+test("aborted deliveries never write to the terminal", async () => {
+  const harness = createExtensionHarness();
+  const controller = new AbortController();
+  controller.abort();
+  assert.deepEqual(
+    await deliverNotification(harness.pi, notification, { ghostty: true }, controller.signal, "linux", () => assert.fail("must not write")),
+    { ok: false, aborted: true },
   );
-
-  assert.deepEqual(result, { ok: false, error: "tmux: tmux unavailable" });
-  assert.deepEqual(harness.execCalls.map(({ command }) => command), ["kitten", "tmux"]);
 });
 
-test("notification close or expiry, command failure, and abort do not select a tmux pane or reject", async () => {
-  for (const outcome of ["close", "expiry", "failure", "abort"] as const) {
-    const controller = new AbortController();
-    const harness = createExtensionHarness({
-      exec: ({ command, options }) => {
-        if (command !== "kitten") return { ...success, code: 1, stderr: "fallback failed" };
-        if (outcome === "close" || outcome === "expiry") return success;
-        if (outcome === "failure") return { ...success, code: 1, stderr: "kitty failed" };
-        return new Promise((resolve) => options?.signal?.addEventListener("abort", () => {
-          resolve({ ...success, code: 1, killed: true });
-        }, { once: true }));
-      },
-    });
-
-    const pending = deliverNotification(
-      harness.pi,
-      notification,
-      { kittyWindowId: "42", tmuxPane: "%7" },
-      "session-id",
-      controller.signal,
-      "linux",
+test("failed Ghostty delivery falls back to notify-send and reports failures", async () => {
+  for (const code of [0, 1]) {
+    const harness = createExtensionHarness({ exec: () => ({ ...success, code, stderr: code ? "daemon failed" : "" }) });
+    const result = await deliverNotification(
+      harness.pi, notification, { ghostty: true }, new AbortController().signal, "linux", () => { throw new Error("tty unavailable"); },
     );
-    if (outcome === "abort") controller.abort();
-    const result = await pending;
-
-    assert.equal(harness.execCalls.some(({ command }) => command === "tmux"), false);
-    assert.equal(result.ok, outcome === "close" || outcome === "expiry");
-    if (outcome === "abort") assert.deepEqual(result, { ok: false, aborted: true });
+    assert.deepEqual(result, code ? { ok: false, error: "Ghostty: tty unavailable; notify-send: daemon failed" } : { ok: true });
+    assert.deepEqual(harness.execCalls.map(({ command }) => command), ["notify-send"]);
   }
 });
 
-test("factory captures origin, generates IDs per session, reports failure, and aborts on shutdown", async () => {
-  const controllers: AbortSignal[] = [];
-  let resolveKitten: ((result: ExecResult) => void) | undefined;
-  const harness = createExtensionHarness({
-    exec: ({ command, options }) => {
-      if (command === "kitten") {
-        controllers.push(options!.signal!);
-        return new Promise((resolve) => { resolveKitten = resolve; });
-      }
-      return { ...success, code: 1, stderr: "notify-send failed" };
-    },
+test("no controlling TTY falls back to notify-send without leaking OSC to stdout", async () => {
+  const moduleUrl = new URL("../src/index.ts", import.meta.url).href;
+  const script = `
+    import { deliverNotification } from ${JSON.stringify(moduleUrl)};
+    const calls = [];
+    const pi = { exec: async (command) => { calls.push(command); return { code: 0, stdout: "", stderr: "" }; } };
+    const result = await deliverNotification(pi,
+      { title: "test", body: "body", urgency: "normal", expiryMs: 1000 },
+      { ghostty: true }, new AbortController().signal, "linux");
+    process.stdout.write(JSON.stringify({ result, calls }));
+  `;
+  const child = spawn(process.execPath, ["--input-type=module", "--eval", script], {
+    detached: true, stdio: ["ignore", "pipe", "pipe"],
   });
-  const ids = ["first", "second"];
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (text) => { stdout += text; });
+  child.stderr.setEncoding("utf8").on("data", (text) => { stderr += text; });
+  const status = await new Promise<number | null>((resolve) => child.on("close", resolve));
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(JSON.parse(stdout), { result: { ok: true }, calls: ["notify-send"] });
+});
+
+test("outside Ghostty, Linux uses notify-send", async () => {
+  const harness = createExtensionHarness();
+  assert.deepEqual(
+    await deliverNotification(harness.pi, notification, { ghostty: false }, new AbortController().signal, "linux"),
+    { ok: true },
+  );
+  assert.deepEqual(harness.execCalls[0]?.args, [
+    "--app-name=Pi", "--icon=system-monitor", "--urgency=critical", "--expire-time=2500",
+    "Pi run complete", "Prompt: inspect logs\nDuration: 12.5s",
+  ]);
+});
+
+test("outside Ghostty and Linux, there is no supported backend", async () => {
+  const harness = createExtensionHarness();
+  assert.deepEqual(
+    await deliverNotification(harness.pi, notification, { ghostty: false }, new AbortController().signal, "darwin"),
+    { ok: false, error: "no supported notification backend" },
+  );
+  assert.deepEqual(harness.execCalls, []);
+});
+
+test("factory sends a settled run through Ghostty and stops reporting focus on shutdown", async () => {
+  const harness = createExtensionHarness();
+  const writes: string[] = [];
   heuristicNotify(harness.pi, {
-    loadConfig: () => ({
-      ok: true,
-      config: { ...DEFAULT_CONFIG, minimumRunMs: 0, minimumAwayMs: 0 },
-    }),
-    env: { KITTY_WINDOW_ID: "42", TMUX_PANE: "%7" },
-    platform: "linux",
-    randomUUID: () => ids.shift()!,
-    writeTerminal: () => {},
+    loadConfig: () => ({ ok: true, config: { ...DEFAULT_CONFIG, minimumRunMs: 0, minimumAwayMs: 0 } }),
+    env: { TERM_PROGRAM: "ghostty" },
+    writeTerminal: (data) => { writes.push(data); },
   });
-
-  for (const reason of ["startup", "switch"] as const) {
-    await harness.emit(
-      "session_start",
-      { type: "session_start", reason },
-      { mode: "tui", hasUI: true },
-    );
-    harness.sendTerminalInput("\x1b[O");
-    await harness.emit("before_agent_start", { type: "before_agent_start", prompt: reason });
-    await harness.emit("agent_start", { type: "agent_start" });
-    await harness.emit("agent_end", {
-      type: "agent_end",
-      messages: [{ role: "assistant", stopReason: "stop" }],
-    });
-    await harness.emit("agent_settled", { type: "agent_settled" });
-    assert.match(harness.execCalls.at(-1)!.args.join(" "), new RegExp(`session-${reason === "startup" ? "first" : "second"}`));
-    resolveKitten!({ ...success, code: 1, stderr: "kitty failed" });
-    await flush();
-  }
-
-  assert.equal(harness.notifications.at(-1)?.type, "error");
-  assert.match(harness.notifications.at(-1)?.message ?? "", /kitty failed.*notify-send failed/);
-
-  await harness.emit("before_agent_start", { type: "before_agent_start", prompt: "shutdown" });
+  await harness.emit("session_start", { type: "session_start", reason: "startup" }, { mode: "tui", hasUI: true });
+  harness.sendTerminalInput("\x1b[O");
+  await harness.emit("before_agent_start", { type: "before_agent_start", prompt: "ship this" });
   await harness.emit("agent_start", { type: "agent_start" });
-  await harness.emit("agent_end", {
-    type: "agent_end",
-    messages: [{ role: "assistant", stopReason: "stop" }],
-  });
+  await harness.emit("agent_end", { type: "agent_end", messages: [{ role: "assistant", stopReason: "stop" }] });
   await harness.emit("agent_settled", { type: "agent_settled" });
+  await flush();
+  assert.match(writes.at(-1) ?? "", /^\x1b]777;notify;Pi run complete;Prompt: ship this \| Duration: /);
+  assert.deepEqual(harness.execCalls, []);
   await harness.emit("session_shutdown", { type: "session_shutdown", reason: "quit" });
-  assert.equal(controllers.at(-1)?.aborted, true);
+  assert.equal(writes.at(-1), "\x1b[?1004l");
+});
+
+test("pending notify-send delivery is aborted on shutdown", async () => {
+  const harness = createExtensionHarness({ exec: () => new Promise(() => {}) });
+  heuristicNotify(harness.pi, {
+    loadConfig: () => ({ ok: true, config: { ...DEFAULT_CONFIG, minimumRunMs: 0, minimumAwayMs: 0 } }),
+    env: {}, platform: "linux", writeTerminal: () => {},
+  });
+  await harness.emit("session_start", { type: "session_start", reason: "startup" }, { mode: "tui", hasUI: true });
+  harness.sendTerminalInput("\x1b[O");
+  await harness.emit("agent_start", { type: "agent_start" });
+  await harness.emit("agent_end", { type: "agent_end", messages: [{ role: "assistant", stopReason: "stop" }] });
+  await harness.emit("agent_settled", { type: "agent_settled" });
+  assert.equal(harness.execCalls[0]?.options?.signal?.aborted, false);
+  await harness.emit("session_shutdown", { type: "session_shutdown", reason: "quit" });
+  assert.equal(harness.execCalls[0]?.options?.signal?.aborted, true);
 });

@@ -24,9 +24,9 @@ Existing Pi notification extensions cover parts of this workflow, but not the co
 
 | Extension | Settled lifecycle | Minimum run time | Minimum continuous away time | Exact-origin activation |
 | --- | --- | --- | --- | --- |
-| [`pi-ping`](https://github.com/Bukutsu/pi-ping) | Yes | Fixed work gate using duration, tools, or errors | No; checks focus only at completion | Partial Kitty/tmux support |
+| [`pi-ping`](https://github.com/Bukutsu/pi-ping) | Yes | Fixed work gate using duration, tools, or errors | No; checks focus only at completion | Partial |
 | [`desktop-notify-kitty`](https://github.com/cjrh/desktop-notify-kitty) | No; uses `agent_end` | No | No | Kitty-focused |
-| `pi-heuristic-notify` | Yes, using `agent_settled` | Configurable | Configurable and continuous | Originating niri window, Kitty tab/window, and tmux pane where available |
+| `pi-heuristic-notify` | Yes, using `agent_settled` | Configurable | Configurable and continuous | Originating Ghostty surface, where notification activation is supported |
 
 This extension was created to avoid notifications that are technically correct but not useful: short work, momentary focus changes, intermediate retries, queued continuations, and completions that the user already watched. Requiring both sustained work and sustained absence makes a notification mean that Pi finished something worth returning to. Exact-origin activation then returns the user to the Pi instance that sent it rather than whichever terminal was used most recently.
 
@@ -61,7 +61,7 @@ Create `~/.pi/agent/pi-heuristic-notify.json`:
 }
 ```
 
-Every property is optional; omitted properties use the values shown above. Durations may be zero or fractional, but must be finite and non-negative. `urgency` must be `low`, `normal`, or `critical`; `showPrompt` and `notifyOnQuestion` must be booleans. Set `notifyOnQuestion` to `false` to disable question alerts. When `showPrompt` is `false`, question and prompt text are both hidden; otherwise the alert shows the first question, last user prompt, and elapsed run duration.
+Every property is optional; omitted properties use the values shown above. Durations may be zero or fractional, but must be finite and non-negative. `urgency` must be `low`, `normal`, or `critical`; `showPrompt` and `notifyOnQuestion` must be booleans. Set `notifyOnQuestion` to `false` to disable question alerts. When `showPrompt` is `false`, question and prompt text are both hidden; otherwise the alert shows the first question, last user prompt, and elapsed run duration. `urgency` and `expirySeconds` apply to the Linux `notify-send` fallback; Ghostty's OSC 777 notification protocol does not accept them.
 
 Pi's `PI_CODING_AGENT_DIR` relocates the file with the rest of the agent configuration. A missing file uses defaults. Invalid JSON or values report an error and disable automatic and test notifications for that session. Run `/reload` after editing the file.
 
@@ -70,7 +70,7 @@ CLI flags, project-local overrides, live file watching, and automatic config gen
 ## Commands
 
 - `/notify-check` reports the resolved configuration path, effective values, focus and away time, run duration, pending delivery, backend, and suppression reason.
-- `/notify-test` sends an immediate test through the selected backend without applying heuristic thresholds. Under niri it watches the notification daemon's action asynchronously and exercises the same niri/Kitty/tmux origin restoration as automatic notifications.
+- `/notify-test` sends an immediate test through the selected backend without applying heuristic thresholds.
 
 Command and delivery failures are reported in Pi without crashing the session.
 
@@ -78,21 +78,15 @@ Command and delivery failures are reported in Pi without crashing the session.
 
 - Node.js 22.19 or newer.
 - Pi 0.82.1 (tested).
-- Kitty 0.36 or newer for notification activation that focuses the originating Kitty window and tab.
-- niri IPC for optional exact OS-window and workspace restoration under niri.
-- Linux `notify-send` for fallback delivery outside Kitty or when Kitty delivery fails.
-- tmux `focus-events` when running inside tmux:
-
-```tmux
-set -g focus-events on
-```
+- Ghostty with OSC 777 notifications for native activation of the originating surface.
+- Linux `notify-send` for fallback delivery outside Ghostty or when writing to the terminal fails.
 
 The extension has zero npm runtime, peer, and optional dependencies. Its deployed source uses Node built-ins and Pi's host-provided extension API.
 
 ## Backends And Limits
 
-Inside Kitty, `kitten notify` uses a unique identifier per Pi session. Activating it focuses the originating Kitty window and tab; inside tmux, the captured `TMUX_PANE` is selected only after activation. Under niri, the extension validates the focused Kitty toplevel against `KITTY_PID`, captures its niri window ID without polling, and uses `notify-send --action` to observe the click directly. It then focuses the captured niri window, Kitty tab, and tmux pane in order. If niri reports success but the originating window is not focused, it retries once after 200 ms and reports a failure if focus still did not change. Capture and focus failures are non-fatal. Outstanding activation watchers are aborted on session shutdown.
+Inside Ghostty, the extension writes an OSC 777 notification to the originating terminal surface; clicking the native notification requests that Ghostty present that surface (window/tab/split). Whether the window is actually raised depends on the desktop notification server forwarding activation to Ghostty (including an XDG activation token on Wayland). Ghostty may silently rate-limit alerts (one per second across the app, or repeat content within five seconds) and replace an earlier alert with the same body; this extension does not patch Ghostty or the notification server. `/notify-test` confirms the sequence was written, not that an alert appeared or was activated.
 
-On Linux, failed or unavailable Kitty delivery falls back to `notify-send`. Generic notification servers cannot guarantee that clicking returns to the originating terminal. Commands receive notification content as argument arrays, never shell command strings.
+On Linux, failed or unavailable Ghostty delivery falls back to `notify-send`. Generic notification servers cannot guarantee that clicking returns to the originating terminal. Commands receive notification content as argument arrays, never shell command strings.
 
-The initial release targets Kitty and Linux. It does not implement done-tab markers, broad cross-platform backends, or terminal visibility detection.
+The extension targets Ghostty and Linux. It does not implement done-tab markers, broad cross-platform backends, or terminal visibility detection.

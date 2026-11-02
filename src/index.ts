@@ -1,7 +1,5 @@
-import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -49,6 +47,11 @@ function writeTerminal(data: string): void {
   } catch {
     process.stdout.write(data);
   }
+}
+
+function writeNotification(data: string): void {
+  if (process.stdout.isTTY) return writeTerminal(data);
+  writeFileSync("/dev/tty", data);
 }
 
 export type NotificationUrgency = "low" | "normal" | "critical";
@@ -153,9 +156,7 @@ export type NotificationContent = {
 };
 
 export type NotificationOrigin = {
-  kittyWindowId?: string | undefined;
-  niriWindowId?: number | undefined;
-  tmuxPane?: string | undefined;
+  ghostty: boolean;
 };
 
 type DeliveryResult =
@@ -167,147 +168,29 @@ function commandError(command: string, result: { code: number; stderr: string; s
   return `${command}: ${detail || `exit code ${result.code}`}`;
 }
 
-export async function captureNiriWindowId(
-  pi: ExtensionAPI,
-  kittyPid: string,
-  signal: AbortSignal,
-): Promise<number | undefined> {
-  try {
-    const result = await pi.exec("niri", ["msg", "--json", "focused-window"], { signal });
-    if (signal.aborted || result.code !== 0) return undefined;
-    const window: unknown = JSON.parse(result.stdout);
-    if (
-      typeof window === "object"
-      && window !== null
-      && "id" in window
-      && typeof window.id === "number"
-      && Number.isSafeInteger(window.id)
-      && "app_id" in window
-      && window.app_id === "kitty"
-      && "pid" in window
-      && window.pid === Number(kittyPid)
-    ) return window.id;
-  } catch {
-    // Origin discovery is optional; notification delivery still works without niri.
-  }
-  return undefined;
-}
-
 export async function deliverNotification(
   pi: ExtensionAPI,
   notification: NotificationContent,
   origin: NotificationOrigin,
-  identifier: string,
   signal: AbortSignal,
   platform = process.platform,
-  waitForFocus = (ms: number, signal: AbortSignal) => delay(ms, undefined, { signal }),
+  write: (data: string) => void = writeNotification,
 ): Promise<DeliveryResult> {
-  if (platform === "linux" && origin.kittyWindowId && origin.niriWindowId !== undefined) {
-    const niriId = origin.niriWindowId;
-    const focusArgs = ["msg", "action", "focus-window", "--id", String(niriId)];
-    let failureSource = "notify-send";
-    const errors: string[] = [];
-    const finish = (error?: string): DeliveryResult => {
-      if (error) errors.push(error);
-      return errors.length ? { ok: false, error: errors.join("; ") } : { ok: true };
-    };
+  if (signal.aborted) return { ok: false, aborted: true };
+  let ghosttyError: string | undefined;
+  if (origin.ghostty) {
     try {
-      const result = await pi.exec("notify-send", [
-        "--app-name=Pi",
-        "--icon=system-monitor",
-        `--urgency=${notification.urgency}`,
-        `--expire-time=${Math.round(notification.expiryMs)}`,
-        "--action=default=Open",
-        notification.title,
-        notification.body,
-      ], { signal });
-      if (signal.aborted) return { ok: false, aborted: true };
-      if (result.code !== 0) return { ok: false, error: commandError("notify-send", result) };
-      if (result.stdout.trim() !== "default") return { ok: true };
-
-      for (const [command, args] of [
-        ["niri", focusArgs],
-        ["kitten", ["@", "focus-window", "--match", `id:${origin.kittyWindowId}`]],
-        ...(origin.tmuxPane ? [["tmux", ["select-pane", "-t", origin.tmuxPane]]] : []),
-      ] as Array<[string, string[]]>) {
-        try {
-          const restored = await pi.exec(command, args, { signal });
-          if (signal.aborted) return { ok: false, aborted: true };
-          if (restored.code !== 0) errors.push(commandError(command, restored));
-        } catch (error) {
-          if (signal.aborted) return { ok: false, aborted: true };
-          errors.push(`${command}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-      const focusedWindowId = async () => {
-        failureSource = "niri focused-window";
-        const focused = await pi.exec("niri", ["msg", "--json", "focused-window"], { signal });
-        if (focused.code !== 0) throw new Error((focused.stderr || focused.stdout).trim() || `exit code ${focused.code}`);
-        return JSON.parse(focused.stdout)?.id;
-      };
-      const before = await focusedWindowId();
-      if (before !== niriId) {
-        await waitForFocus(200, signal);
-        if (signal.aborted) return { ok: false, aborted: true };
-        const after = await focusedWindowId();
-        if (after !== niriId && after !== before) {
-          return finish("niri: focus changed before retry");
-        }
-        if (after === before) {
-          failureSource = "niri focus-window";
-          const retried = await pi.exec("niri", focusArgs, { signal });
-          if (signal.aborted) return { ok: false, aborted: true };
-          if (retried.code !== 0) return finish(commandError("niri", retried));
-          if (await focusedWindowId() !== niriId) {
-            return finish(`niri: focus-window did not focus window ${niriId}`);
-          }
-        }
-      }
-      if (signal.aborted) return { ok: false, aborted: true };
-      return finish();
+      const title = notification.title.replace(/[;\x00-\x1f\x7f-\x9f]/g, " ");
+      const body = notification.body.replace(/\r?\n/g, " | ").replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
+      const osc = `${ESC}]777;notify;${title};${body}\x07`;
+      write(osc);
+      return { ok: true };
     } catch (error) {
-      if (signal.aborted) return { ok: false, aborted: true };
-      return finish(`${failureSource}: ${error instanceof Error ? error.message : String(error)}`);
+      ghosttyError = `Ghostty: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 
-  let kittyError: string | undefined;
-  if (origin.kittyWindowId) {
-    try {
-      const result = await pi.exec("kitten", [
-        "notify",
-        "--app-name=Pi",
-        "--icon=system-monitor",
-        `--urgency=${notification.urgency}`,
-        `--expire-after=${notification.expiryMs / 1_000}s`,
-        `--identifier=${identifier}`,
-        "--wait-for-completion",
-        notification.title,
-        notification.body,
-      ], { signal });
-      if (signal.aborted) return { ok: false, aborted: true };
-      if (result.code === 0) {
-        const activated = result.stdout.trim() === "0";
-        if (activated && origin.tmuxPane) {
-          try {
-            const selected = await pi.exec("tmux", ["select-pane", "-t", origin.tmuxPane], { signal });
-            if (signal.aborted) return { ok: false, aborted: true };
-            if (selected.code !== 0) return { ok: false, error: commandError("tmux", selected) };
-          } catch (error) {
-            if (signal.aborted) return { ok: false, aborted: true };
-            return { ok: false, error: `tmux: ${error instanceof Error ? error.message : String(error)}` };
-          }
-        }
-        return { ok: true };
-      }
-      kittyError = commandError("kitten notify", result);
-    } catch (error) {
-      if (signal.aborted) return { ok: false, aborted: true };
-      kittyError = `kitten notify: ${error instanceof Error ? error.message : String(error)}`;
-    }
-  }
-
-  if (platform !== "linux") return { ok: false, error: kittyError ?? "no supported notification backend" };
+  if (platform !== "linux") return { ok: false, error: ghosttyError ?? "no supported notification backend" };
   try {
     const result = await pi.exec("notify-send", [
       "--app-name=Pi",
@@ -321,16 +204,13 @@ export async function deliverNotification(
     if (result.code === 0) return { ok: true };
     return {
       ok: false,
-      error: [kittyError, commandError("notify-send", result)].filter(Boolean).join("; "),
+      error: [ghosttyError, commandError("notify-send", result)].filter(Boolean).join("; "),
     };
   } catch (error) {
     if (signal.aborted) return { ok: false, aborted: true };
     return {
       ok: false,
-      error: [
-        kittyError,
-        `notify-send: ${error instanceof Error ? error.message : String(error)}`,
-      ].filter(Boolean).join("; "),
+      error: [ghosttyError, `notify-send: ${error instanceof Error ? error.message : String(error)}`].filter(Boolean).join("; "),
     };
   }
 }
@@ -384,7 +264,6 @@ type Runtime = {
   schedule?: (delayMs: number, callback: () => void) => () => void;
   env?: Record<string, string | undefined>;
   platform?: NodeJS.Platform;
-  randomUUID?: () => string;
   loadConfig?: () => ConfigResult;
 };
 
@@ -400,13 +279,9 @@ export default function heuristicNotify(
   });
   const focus = createFocusState();
   const env = runtime.env ?? process.env;
-  const origin: NotificationOrigin = {
-    kittyWindowId: env.KITTY_WINDOW_ID,
-    tmuxPane: env.TMUX_PANE,
-  };
+  const origin: NotificationOrigin = { ghostty: env.TERM_PROGRAM === "ghostty" };
   const controllers = new Set<AbortController>();
   let config: NotifyConfig | undefined;
-  let sessionIdentifier = "";
   let reportError: ((message: string) => void) | undefined;
   let runStart: number | undefined;
   let lastRunDurationMs: number | undefined;
@@ -423,21 +298,7 @@ export default function heuristicNotify(
     for (const controller of controllers) controller.abort();
     controllers.clear();
   };
-  const resolveNiriOrigin = async () => {
-    if (!origin.kittyWindowId || !env.NIRI_SOCKET || !env.KITTY_PID || origin.niriWindowId !== undefined) return;
-    const controller = new AbortController();
-    controllers.add(controller);
-    try {
-      const windowId = await captureNiriWindowId(pi, env.KITTY_PID, controller.signal);
-      if (!controller.signal.aborted && windowId !== undefined) origin.niriWindowId = windowId;
-    } finally {
-      controllers.delete(controller);
-    }
-  };
-  const send = async (
-    notification: NotificationContent,
-    identifier = sessionIdentifier,
-  ) => {
+  const send = async (notification: NotificationContent) => {
     const controller = new AbortController();
     controllers.add(controller);
     try {
@@ -445,9 +306,9 @@ export default function heuristicNotify(
         pi,
         notification,
         origin,
-        identifier,
         controller.signal,
         runtime.platform,
+        runtime.writeTerminal ?? writeNotification,
       );
     } finally {
       controllers.delete(controller);
@@ -523,11 +384,9 @@ export default function heuristicNotify(
       const awayMs = continuousAwayMs(focus, at);
       const focusState = !focus.observed ? "unknown" : focus.focused ? "focused" : "unfocused";
       const runDurationMs = runStart === undefined ? lastRunDurationMs : at - runStart;
-      const backend = origin.niriWindowId !== undefined && origin.kittyWindowId
-        ? `notify-send action + niri window ${origin.niriWindowId} + Kitty window ${origin.kittyWindowId}${origin.tmuxPane ? ` + tmux pane ${origin.tmuxPane}` : ""}`
-        : origin.kittyWindowId
-          ? `Kitty${origin.tmuxPane ? ` + tmux pane ${origin.tmuxPane}` : ""}`
-          : (runtime.platform ?? process.platform) === "linux" ? "notify-send" : "unsupported";
+      const backend = origin.ghostty
+        ? "Ghostty OSC 777"
+        : (runtime.platform ?? process.platform) === "linux" ? "notify-send" : "unsupported";
       const configText = config
         ? `run >= ${formatDuration(config.minimumRunMs)}; away >= ${formatDuration(config.minimumAwayMs)}; urgency ${config.urgency}; expiry ${formatDuration(config.expiryMs)}; prompt ${config.showPrompt ? "shown" : "hidden"}; questions ${config.notifyOnQuestion ? "on" : "off"}`
         : "invalid";
@@ -550,24 +409,16 @@ export default function heuristicNotify(
         ctx.ui.notify("Test notification failed: invalid configuration", "error");
         return;
       }
-      await resolveNiriOrigin();
       const pending = send({
         title: "Pi notification test",
         body: "Desktop notifications are working.",
         urgency: config.urgency,
         expiryMs: config.expiryMs,
-      }, `${sessionIdentifier}-test`);
-      if (origin.kittyWindowId) {
-        ctx.ui.notify("Test notification sent", "info");
-        void pending.then((result) => {
-          if (!result.ok && !result.aborted) {
-            ctx.ui.notify(`Test notification failed: ${result.error ?? "unknown delivery failure"}`, "error");
-          }
-        });
-        return;
-      }
+      });
       const result = await pending;
-      if (result.ok) ctx.ui.notify("Test notification sent", "info");
+      if (result.ok) ctx.ui.notify(origin.ghostty
+        ? "Test sequence written; Ghostty may suppress the notification"
+        : "Test notification sent", "info");
       else if (!result.aborted) ctx.ui.notify(`Test notification failed: ${result.error ?? "unknown delivery failure"}`, "error");
     },
   });
@@ -579,7 +430,6 @@ export default function heuristicNotify(
     resetRun();
     lastRunDurationMs = undefined;
     Object.assign(focus, createFocusState());
-    sessionIdentifier = `pi-heuristic-notify-session-${(runtime.randomUUID ?? randomUUID)()}`;
     reportError = (message) => ctx.ui.notify(`pi-heuristic-notify: ${message}`, "error");
     const result = (runtime.loadConfig ?? loadConfig)();
     config = result.ok ? result.config : undefined;
@@ -588,7 +438,6 @@ export default function heuristicNotify(
     listenForQuestions();
 
     if (ctx.mode !== "tui" || unsubscribeInput) return;
-    void resolveNiriOrigin();
     unsubscribeInput = ctx.ui.onTerminalInput((data) => {
       if (data.includes(`${ESC}[I`)) {
         cancelEligibility();
@@ -598,7 +447,6 @@ export default function heuristicNotify(
           question.suppressed = true;
         }
         suppression = "focused";
-        void resolveNiriOrigin();
       }
       const output = scanFocusInput(data, focus, now());
       if (data.includes(`${ESC}[O`)) for (const id of questions.keys()) scheduleQuestion(id);

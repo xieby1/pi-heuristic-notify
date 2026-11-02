@@ -134,16 +134,16 @@ test("pairs overlapping questionnaires by toolCallId", async () => {
   assert.deepEqual(s.sent.map(({ body }) => body), ["Question: Second?\nPrompt: original prompt\nDuration: 1s"]);
 });
 
-test("question alerts use the existing Kitty origin delivery", async () => {
+test("question alerts use the originating Ghostty surface", async () => {
   const harness = createExtensionHarness();
+  const writes: string[] = [];
   let now = 0;
   let fire: (() => void) | undefined;
   heuristicNotify(harness.pi, {
     now: () => now,
-    writeTerminal: () => {},
-    env: { KITTY_WINDOW_ID: "42" },
+    writeTerminal: (data) => { writes.push(data); },
+    env: { TERM_PROGRAM: "ghostty" },
     platform: "linux",
-    randomUUID: () => "question-id",
     loadConfig: () => ({ ok: true, config: { ...DEFAULT_CONFIG, minimumAwayMs: 0 } }),
     schedule: (_delayMs, callback) => { fire = callback; return () => { fire = undefined; }; },
   });
@@ -155,12 +155,8 @@ test("question alerts use the existing Kitty origin delivery", async () => {
   harness.emitEvent("rpiv:ask-user:prompt", { toolCallId: "ask-1", questions: [{ question: "Which option?" }] });
   harness.emitEvent("rpiv:ask-user:blocked", { toolCallId: "ask-1", active: true });
   fire?.();
-  assert.deepEqual(harness.execCalls[0]?.args, [
-    "notify", "--app-name=Pi", "--icon=system-monitor", "--urgency=normal",
-    "--expire-after=10s", "--identifier=pi-heuristic-notify-session-question-id",
-    "--wait-for-completion", "Pi needs your input",
-    "Question: Which option?\nPrompt: original prompt\nDuration: 1s",
-  ]);
+  assert.equal(writes.at(-1), "\x1b]777;notify;Pi needs your input;Question: Which option? | Prompt: original prompt | Duration: 1s\x07");
+  assert.deepEqual(harness.execCalls, []);
 });
 
 test("session shutdown removes question listeners before reload", async () => {
