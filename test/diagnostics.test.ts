@@ -207,6 +207,7 @@ test("notify-test watches the DMS action without blocking the command", async ()
   assert.deepEqual(s.harness.execCalls.slice(1).map(({ command, args }) => ({ command, args })), [
     { command: "niri", args: ["msg", "action", "focus-window", "--id", "162"] },
     { command: "kitten", args: ["@", "focus-window", "--match", "id:42"] },
+    { command: "niri", args: ["msg", "--json", "focused-window"] },
   ]);
 });
 

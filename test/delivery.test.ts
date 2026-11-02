@@ -56,7 +56,11 @@ test("niri capture ignores unavailable IPC, malformed output, and failed identit
 
 test("niri delivery observes the DMS action and restores window, Kitty tab, then tmux pane", async () => {
   const harness = createExtensionHarness({
-    exec: ({ command }) => command === "notify-send" ? { ...success, stdout: "default\n" } : success,
+    exec: ({ command, args }) => command === "notify-send"
+      ? { ...success, stdout: "default\n" }
+      : command === "niri" && args.includes("focused-window")
+        ? { ...success, stdout: JSON.stringify({ id: 162 }) }
+        : success,
   });
 
   assert.deepEqual(
@@ -83,17 +87,149 @@ test("niri delivery observes the DMS action and restores window, Kitty tab, then
     { command: "niri", args: ["msg", "action", "focus-window", "--id", "162"] },
     { command: "kitten", args: ["@", "focus-window", "--match", "id:42"] },
     { command: "tmux", args: ["select-pane", "-t", "%7"] },
+    { command: "niri", args: ["msg", "--json", "focused-window"] },
   ]);
+});
+
+test("niri retries when focus command succeeds but the originating workspace stays inactive", async () => {
+  let attempts = 0;
+  const harness = createExtensionHarness({
+    exec: ({ command, args }) => {
+      if (command === "notify-send") return { ...success, stdout: "default\n" };
+      if (command === "niri" && args.includes("focus-window")) attempts++;
+      if (command === "niri" && args.includes("focused-window")) {
+        return { ...success, stdout: JSON.stringify({ id: attempts < 2 ? 60 : 162 }) };
+      }
+      return success;
+    },
+  });
+
+  assert.deepEqual(
+    await deliverNotification(
+      harness.pi, notification, { kittyWindowId: "42", niriWindowId: 162 },
+      "session-id", new AbortController().signal, "linux", async () => {},
+    ),
+    { ok: true },
+  );
+  assert.equal(attempts, 2);
+  assert.equal(harness.execCalls.at(-1)?.args.includes("focused-window"), true);
+});
+
+test("niri does not retry after focus changes during the wait", async () => {
+  for (const [afterWait, expected] of [
+    [162, { ok: true }],
+    [90, { ok: false, error: "niri: focus changed before retry" }],
+  ] as const) {
+    let focusedId = 60;
+    let attempts = 0;
+    const harness = createExtensionHarness({
+      exec: ({ command, args }) => {
+        if (command === "notify-send") return { ...success, stdout: "default\n" };
+        if (command === "niri" && args.includes("focus-window")) {
+          attempts++;
+          if (attempts > 1) focusedId = 162;
+        }
+        if (command === "niri" && args.includes("focused-window")) {
+          return { ...success, stdout: JSON.stringify({ id: focusedId }) };
+        }
+        return success;
+      },
+    });
+    assert.deepEqual(
+      await deliverNotification(
+        harness.pi, notification, { kittyWindowId: "42", niriWindowId: 162 },
+        "session-id", new AbortController().signal, "linux", async () => { focusedId = afterWait; },
+      ),
+      expected,
+    );
+    assert.equal(attempts, 1);
+  }
+});
+
+test("niri still restores the OS window when Kitty focus fails", async () => {
+  let focusAttempts = 0;
+  const harness = createExtensionHarness({
+    exec: ({ command, args }) => {
+      if (command === "notify-send") return { ...success, stdout: "default\n" };
+      if (command === "kitten") return { ...success, code: 1, stderr: "remote unavailable" };
+      if (command === "niri" && args.includes("focus-window")) focusAttempts++;
+      if (command === "niri" && args.includes("focused-window")) {
+        return { ...success, stdout: JSON.stringify({ id: focusAttempts < 2 ? 60 : 162 }) };
+      }
+      return success;
+    },
+  });
+  assert.deepEqual(
+    await deliverNotification(
+      harness.pi, notification, { kittyWindowId: "42", niriWindowId: 162 },
+      "session-id", new AbortController().signal, "linux", async () => {},
+    ),
+    { ok: false, error: "kitten: remote unavailable" },
+  );
+  assert.equal(focusAttempts, 2);
+});
+
+test("niri reports a successful focus command that never reaches the originating window", async () => {
+  const harness = createExtensionHarness({
+    exec: ({ command, args }) => command === "notify-send"
+      ? { ...success, stdout: "default\n" }
+      : command === "niri" && args.includes("focused-window")
+        ? { ...success, stdout: JSON.stringify({ id: 60 }) }
+        : success,
+  });
+  assert.deepEqual(
+    await deliverNotification(
+      harness.pi, notification, { kittyWindowId: "42", niriWindowId: 162 },
+      "session-id", new AbortController().signal, "linux", async () => {},
+    ),
+    { ok: false, error: "niri: focus-window did not focus window 162" },
+  );
+  assert.equal(harness.execCalls.filter(({ args }) => args.includes("focus-window") && args[0] === "msg").length, 2);
+});
+
+test("aborting a pending niri retry does not focus a window", async () => {
+  const controller = new AbortController();
+  const harness = createExtensionHarness({
+    exec: ({ command, args }) => command === "notify-send"
+      ? { ...success, stdout: "default\n" }
+      : command === "niri" && args.includes("focused-window")
+        ? { ...success, stdout: JSON.stringify({ id: 60 }) }
+        : success,
+  });
+  const result = await deliverNotification(
+    harness.pi, notification, { kittyWindowId: "42", niriWindowId: 162 },
+    "session-id", controller.signal, "linux", async () => { controller.abort(); },
+  );
+  assert.deepEqual(result, { ok: false, aborted: true });
+  assert.equal(harness.execCalls.filter(({ command, args }) => command === "niri" && args.includes("focus-window")).length, 1);
+});
+
+test("niri verification errors identify the failing command", async () => {
+  const harness = createExtensionHarness({
+    exec: ({ command, args }) => command === "notify-send"
+      ? { ...success, stdout: "default\n" }
+      : command === "niri" && args.includes("focused-window")
+        ? { ...success, code: 1, stderr: "IPC failed" }
+        : success,
+  });
+  const result = await deliverNotification(
+    harness.pi, notification, { kittyWindowId: "42", niriWindowId: 162 },
+    "session-id", new AbortController().signal, "linux", async () => {},
+  );
+  assert.deepEqual(result, { ok: false, error: "niri focused-window: IPC failed" });
 });
 
 test("niri delivery failures remain non-fatal and never focus another window", async () => {
   for (const failure of ["notify-send", "niri", "kitten"] as const) {
     const harness = createExtensionHarness({
-      exec: ({ command }) => {
+      exec: ({ command, args }) => {
         if (command === "notify-send") {
           return failure === command
             ? { ...success, code: 1, stderr: "notification failed" }
             : { ...success, stdout: "default\n" };
+        }
+        if (command === "niri" && args.includes("focused-window")) {
+          return { ...success, stdout: JSON.stringify({ id: 162 }) };
         }
         return command === failure
           ? { ...success, code: 1, stderr: `${command} failed` }
@@ -117,7 +253,7 @@ test("niri delivery failures remain non-fatal and never focus another window", a
     );
     assert.equal(
       harness.execCalls.filter(({ command }) => command === "niri").length,
-      failure === "notify-send" ? 0 : 1,
+      failure === "notify-send" ? 0 : 2,
     );
   }
 });

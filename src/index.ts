@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -193,8 +194,17 @@ export async function deliverNotification(
   identifier: string,
   signal: AbortSignal,
   platform = process.platform,
+  waitForFocus = (ms: number, signal: AbortSignal) => delay(ms, undefined, { signal }),
 ): Promise<DeliveryResult> {
   if (platform === "linux" && origin.kittyWindowId && origin.niriWindowId !== undefined) {
+    const niriId = origin.niriWindowId;
+    const focusArgs = ["msg", "action", "focus-window", "--id", String(niriId)];
+    let failureSource = "notify-send";
+    const errors: string[] = [];
+    const finish = (error?: string): DeliveryResult => {
+      if (error) errors.push(error);
+      return errors.length ? { ok: false, error: errors.join("; ") } : { ok: true };
+    };
     try {
       const result = await pi.exec("notify-send", [
         "--app-name=Pi",
@@ -209,9 +219,8 @@ export async function deliverNotification(
       if (result.code !== 0) return { ok: false, error: commandError("notify-send", result) };
       if (result.stdout.trim() !== "default") return { ok: true };
 
-      const errors: string[] = [];
       for (const [command, args] of [
-        ["niri", ["msg", "action", "focus-window", "--id", String(origin.niriWindowId)]],
+        ["niri", focusArgs],
         ["kitten", ["@", "focus-window", "--match", `id:${origin.kittyWindowId}`]],
         ...(origin.tmuxPane ? [["tmux", ["select-pane", "-t", origin.tmuxPane]]] : []),
       ] as Array<[string, string[]]>) {
@@ -224,10 +233,35 @@ export async function deliverNotification(
           errors.push(`${command}: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
-      return errors.length ? { ok: false, error: errors.join("; ") } : { ok: true };
+      const focusedWindowId = async () => {
+        failureSource = "niri focused-window";
+        const focused = await pi.exec("niri", ["msg", "--json", "focused-window"], { signal });
+        if (focused.code !== 0) throw new Error((focused.stderr || focused.stdout).trim() || `exit code ${focused.code}`);
+        return JSON.parse(focused.stdout)?.id;
+      };
+      const before = await focusedWindowId();
+      if (before !== niriId) {
+        await waitForFocus(200, signal);
+        if (signal.aborted) return { ok: false, aborted: true };
+        const after = await focusedWindowId();
+        if (after !== niriId && after !== before) {
+          return finish("niri: focus changed before retry");
+        }
+        if (after === before) {
+          failureSource = "niri focus-window";
+          const retried = await pi.exec("niri", focusArgs, { signal });
+          if (signal.aborted) return { ok: false, aborted: true };
+          if (retried.code !== 0) return finish(commandError("niri", retried));
+          if (await focusedWindowId() !== niriId) {
+            return finish(`niri: focus-window did not focus window ${niriId}`);
+          }
+        }
+      }
+      if (signal.aborted) return { ok: false, aborted: true };
+      return finish();
     } catch (error) {
       if (signal.aborted) return { ok: false, aborted: true };
-      return { ok: false, error: `notify-send: ${error instanceof Error ? error.message : String(error)}` };
+      return finish(`${failureSource}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

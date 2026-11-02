@@ -88,7 +88,7 @@ The extension has zero npm runtime, peer, and optional dependencies. Its deploye
 
 ## Backends And Limits
 
-Inside Kitty, `kitten notify` uses a unique identifier per Pi session. Activating it focuses the originating Kitty window and tab; inside tmux, the captured `TMUX_PANE` is selected only after activation. Under niri, the extension validates the focused Kitty toplevel against `KITTY_PID`, captures its niri window ID without polling, and uses `notify-send --action` to observe the click directly. It then focuses the captured niri window, Kitty tab, and tmux pane in order. Capture and focus failures are non-fatal. Outstanding activation watchers are aborted on session shutdown.
+Inside Kitty, `kitten notify` uses a unique identifier per Pi session. Activating it focuses the originating Kitty window and tab; inside tmux, the captured `TMUX_PANE` is selected only after activation. Under niri, the extension validates the focused Kitty toplevel against `KITTY_PID`, captures its niri window ID without polling, and uses `notify-send --action` to observe the click directly. It then focuses the captured niri window, Kitty tab, and tmux pane in order. If niri reports success but the originating window is not focused, it retries once after 200 ms and reports a failure if focus still did not change. Capture and focus failures are non-fatal. Outstanding activation watchers are aborted on session shutdown.
 
 On Linux, failed or unavailable Kitty delivery falls back to `notify-send`. Generic notification servers cannot guarantee that clicking returns to the originating terminal. Commands receive notification content as argument arrays, never shell command strings.
 
