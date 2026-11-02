@@ -44,13 +44,9 @@ function scenario(options: { minimumAwayMs?: number; notifyOnQuestion?: boolean;
       await harness.emit("before_agent_start", { type: "before_agent_start", prompt: "original prompt" });
       await harness.emit("agent_start", { type: "agent_start" });
     },
-    open(id = "ask-1", question = "Which option?", ready = true) {
+    open(id = "ask-1", question = "Which option?") {
       harness.emitEvent("rpiv:ask-user:prompt", { toolCallId: id, questions: [{ question }] });
       harness.emitEvent("rpiv:ask-user:blocked", { toolCallId: id, active: true });
-      if (ready) harness.emitEvent("rpiv:ask-user:ready", { toolCallId: id });
-    },
-    ready(id = "ask-1") {
-      harness.emitEvent("rpiv:ask-user:ready", { toolCallId: id });
     },
     close(id = "ask-1") {
       harness.emitEvent("rpiv:ask-user:blocked", { toolCallId: id, active: false });
@@ -78,15 +74,11 @@ test("notifies while blocked at the away threshold even when the run is short", 
   assert.equal(s.sent.length, 1);
 });
 
-test("does not notify before RPIV mounts the question UI", async () => {
+test("notifies on blocked without requiring a ready event", async () => {
   const s = scenario({ minimumAwayMs: 0 });
   await s.start();
-  s.open("ask-1", "Which option?", false);
-  s.advanceTo(10_000);
-  assert.equal(s.sent.length, 0);
-  assert.deepEqual(s.timerTimes, []);
-  s.ready();
-  s.advanceTo(10_000);
+  s.open();
+  s.advanceTo(0);
   assert.equal(s.sent[0]?.title, "Pi needs your input");
 });
 
@@ -162,7 +154,6 @@ test("question alerts use the existing Kitty origin delivery", async () => {
   now = 1_000;
   harness.emitEvent("rpiv:ask-user:prompt", { toolCallId: "ask-1", questions: [{ question: "Which option?" }] });
   harness.emitEvent("rpiv:ask-user:blocked", { toolCallId: "ask-1", active: true });
-  harness.emitEvent("rpiv:ask-user:ready", { toolCallId: "ask-1" });
   fire?.();
   assert.deepEqual(harness.execCalls[0]?.args, [
     "notify", "--app-name=Pi", "--icon=system-monitor", "--urgency=normal",
@@ -175,15 +166,16 @@ test("question alerts use the existing Kitty origin delivery", async () => {
 test("session shutdown removes question listeners before reload", async () => {
   const s = scenario();
   await s.start();
-  for (const channel of ["rpiv:ask-user:prompt", "rpiv:ask-user:blocked", "rpiv:ask-user:ready"]) {
+  for (const channel of ["rpiv:ask-user:prompt", "rpiv:ask-user:blocked"]) {
     assert.equal(s.harness.eventListenerCount(channel), 1, channel);
   }
+  assert.equal(s.harness.eventListenerCount("rpiv:ask-user:ready"), 0);
   await s.harness.emit("session_shutdown", { type: "session_shutdown", reason: "reload" });
-  for (const channel of ["rpiv:ask-user:prompt", "rpiv:ask-user:blocked", "rpiv:ask-user:ready"]) {
+  for (const channel of ["rpiv:ask-user:prompt", "rpiv:ask-user:blocked"]) {
     assert.equal(s.harness.eventListenerCount(channel), 0, channel);
   }
   await s.start();
-  assert.equal(s.harness.eventListenerCount("rpiv:ask-user:ready"), 1);
+  assert.equal(s.harness.eventListenerCount("rpiv:ask-user:blocked"), 1);
 });
 
 test("question notifications can be disabled and respect prompt privacy", async () => {

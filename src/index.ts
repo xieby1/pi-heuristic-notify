@@ -417,7 +417,7 @@ export default function heuristicNotify(
   let cancelPending: (() => void) | undefined;
   let unsubscribeInput: (() => void) | undefined;
   let unsubscribeQuestions: (() => void) | undefined;
-  const questions = new Map<string, { question: string; blocked?: boolean; ready?: boolean; cancel?: () => void; notified?: boolean; suppressed?: boolean }>();
+  const questions = new Map<string, { question: string; blocked?: boolean; cancel?: () => void; notified?: boolean; suppressed?: boolean }>();
 
   const abortDeliveries = () => {
     for (const controller of controllers) controller.abort();
@@ -473,12 +473,12 @@ export default function heuristicNotify(
   };
   const scheduleQuestion = (id: string) => {
     const question = questions.get(id);
-    if (!config?.notifyOnQuestion || !question?.blocked || !question.ready || question.cancel || question.notified || question.suppressed || runStart === undefined) return;
+    if (!config?.notifyOnQuestion || !question?.blocked || question.cancel || question.notified || question.suppressed || runStart === undefined) return;
     const awayMs = continuousAwayMs(focus, now());
     if (awayMs === undefined) return;
     question.cancel = schedule(Math.max(config.minimumAwayMs - awayMs, 0), () => {
       delete question.cancel;
-      if (questions.get(id) !== question || !question.blocked || !question.ready || !config?.notifyOnQuestion || question.suppressed || runStart === undefined) return;
+      if (questions.get(id) !== question || !question.blocked || !config?.notifyOnQuestion || question.suppressed || runStart === undefined) return;
       const readyAt = now();
       const currentAwayMs = continuousAwayMs(focus, readyAt);
       if (currentAwayMs === undefined) return;
@@ -511,17 +511,10 @@ export default function heuristicNotify(
         question.blocked = true;
         question.suppressed = !focus.observed || focus.focused;
         questions.set(payload.toolCallId, question);
+        scheduleQuestion(payload.toolCallId);
       }
     });
-    const stopReady = pi.events.on("rpiv:ask-user:ready", (data) => {
-      const payload = data as { toolCallId?: unknown } | null;
-      if (!payload || typeof payload.toolCallId !== "string") return;
-      const question = questions.get(payload.toolCallId);
-      if (!question?.blocked) return;
-      question.ready = true;
-      scheduleQuestion(payload.toolCallId);
-    });
-    unsubscribeQuestions = () => { stopPrompt(); stopBlocked(); stopReady(); };
+    unsubscribeQuestions = () => { stopPrompt(); stopBlocked(); };
   };
   pi.registerCommand("notify-check", {
     description: "Show notification state and suppression reason",
