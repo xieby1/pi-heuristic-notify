@@ -7,12 +7,14 @@
 > This repository is retained for its history and existing pinned revisions;
 > the documentation below describes the standalone version.
 
-Pi extension that sends a desktop notification only after Pi fully settles and both conditions hold:
+Pi extension that sends completion notifications only after Pi fully settles and both conditions hold:
 
 ```text
 run duration >= minimum run duration
 and continuous terminal unfocused duration >= minimum away duration
 ```
+
+It also sends a `Pi needs your input` notification while `rpiv-ask-user-question` is waiting for an answer, if the terminal has been continuously unfocused for the minimum away duration. This actionable exception does **not** require a minimum run duration or wait for `agent_settled`. Questions seen while focused stay silent; pending alerts are cancelled when answered, refocused, or shut down. The alert waits until RPIV mounts the question UI, avoiding notifications for failed dialog loads, and uses the same exact-origin activation as completion alerts. This requires RPIV to emit `rpiv:ask-user:ready` when its TUI dialog mounts; the Home Manager RPIV package applies that patch. Unpatched RPIV produces no question alerts (fail-safe). Without `rpiv-ask-user-question`, this feature has no effect and adds no npm runtime dependency.
 
 A final settled run can notify whether it completed successfully or failed; failed runs use the title `Pi run failed`. Intermediate tool or agent errors do not notify while Pi can retry or continue. A run settled while focused is suppressed permanently; leaving the terminal afterward does not notify for that run. Unknown focus, short runs, aborted or interrupted runs, retries, queued follow-ups, and brief focus changes are also suppressed.
 
@@ -54,11 +56,12 @@ Create `~/.pi/agent/pi-heuristic-notify.json`:
   "minimumAwaySeconds": 5,
   "urgency": "normal",
   "expirySeconds": 10,
-  "showPrompt": true
+  "showPrompt": true,
+  "notifyOnQuestion": true
 }
 ```
 
-Every property is optional; omitted properties use the values shown above. Durations may be zero or fractional, but must be finite and non-negative. `urgency` must be `low`, `normal`, or `critical`, and `showPrompt` must be a boolean.
+Every property is optional; omitted properties use the values shown above. Durations may be zero or fractional, but must be finite and non-negative. `urgency` must be `low`, `normal`, or `critical`; `showPrompt` and `notifyOnQuestion` must be booleans. Set `notifyOnQuestion` to `false` to disable question alerts. When `showPrompt` is `false`, question and prompt text are both hidden; otherwise the alert shows the first question, last user prompt, and elapsed run duration.
 
 Pi's `PI_CODING_AGENT_DIR` relocates the file with the rest of the agent configuration. A missing file uses defaults. Invalid JSON or values report an error and disable automatic and test notifications for that session. Run `/reload` after editing the file.
 

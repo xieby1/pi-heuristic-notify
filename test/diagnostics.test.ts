@@ -84,7 +84,7 @@ test("notify-check reports config, focus, duration, pending state, backend, and 
 
   assert.equal(await s.check(), [
     `Config file: ${configPath()}`,
-    "Config: run >= 10s; away >= 5s; urgency normal; expiry 10s; prompt shown",
+    "Config: run >= 10s; away >= 5s; urgency normal; expiry 10s; prompt shown; questions on",
     "Focus: terminal events; unknown; away n/a",
     "Run: n/a",
     "Pending delivery: no",

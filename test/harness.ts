@@ -19,6 +19,7 @@ export function createExtensionHarness(harnessOptions: {
   ) => ExecResult | Promise<ExecResult>;
 } = {}) {
   const handlers = new Map<string, AnyHandler[]>();
+  const eventHandlers = new Map<string, Array<(data: unknown) => void>>();
   const commands = new Map<string, Command>();
   const terminalInputHandlers: TerminalInputHandler[] = [];
   const execCalls: Array<{ command: string; args: string[]; options: ExecOptions | undefined }> = [];
@@ -43,6 +44,15 @@ export function createExtensionHarness(harnessOptions: {
   } as unknown as ExtensionCommandContext;
 
   const pi = {
+    events: {
+      on(channel: string, handler: (data: unknown) => void) {
+        eventHandlers.set(channel, [...(eventHandlers.get(channel) ?? []), handler]);
+        return () => eventHandlers.set(channel, (eventHandlers.get(channel) ?? []).filter((item) => item !== handler));
+      },
+      emit(channel: string, data: unknown) {
+        for (const handler of eventHandlers.get(channel) ?? []) handler(data);
+      },
+    },
     on(event: string, handler: AnyHandler) {
       handlers.set(event, [...(handlers.get(event) ?? []), handler]);
     },
@@ -60,6 +70,8 @@ export function createExtensionHarness(harnessOptions: {
     pi,
     context,
     handlers,
+    emitEvent(channel: string, data: unknown) { pi.events.emit(channel, data); },
+    eventListenerCount(channel: string) { return eventHandlers.get(channel)?.length ?? 0; },
     commands,
     execCalls,
     notifications,

@@ -4,13 +4,14 @@
 
 Build a customizable Pi desktop-notification extension with these behaviors:
 
-- Notify only after Pi fully settles and both configurable heuristic thresholds hold:
+- Notify on completed runs only after Pi fully settles and both configurable heuristic thresholds hold:
 
   ```text
   run duration >= minimum run duration
   and continuous terminal unfocused duration >= minimum away duration
   ```
 
+- As an exception, notify for unanswered `rpiv-ask-user-question` prompts after the minimum continuous-away duration, without a minimum run duration; suppress questions seen while focused, cancel pending alerts on answer/refocus, and allow users to opt out.
 - Allow users to customize the heuristic thresholds and notification behavior.
 - The deployed extension must have zero npm runtime dependencies; development and test dependencies are allowed.
 - Clicking a notification must focus the exact Pi instance that sent it, including the originating terminal window, tab, or pane where supported.

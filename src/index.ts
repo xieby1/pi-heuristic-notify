@@ -59,6 +59,7 @@ export type NotifyConfig = {
   urgency: NotificationUrgency;
   expiryMs: number;
   showPrompt: boolean;
+  notifyOnQuestion: boolean;
 };
 
 export const DEFAULT_CONFIG: NotifyConfig = {
@@ -67,6 +68,7 @@ export const DEFAULT_CONFIG: NotifyConfig = {
   urgency: "normal",
   expiryMs: 10_000,
   showPrompt: true,
+  notifyOnQuestion: true,
 };
 
 type ConfigResult =
@@ -100,10 +102,14 @@ export function parseConfig(values: Record<string, unknown>): ConfigResult {
   if (typeof showPrompt !== "boolean") {
     return { ok: false, error: "showPrompt must be boolean" };
   }
+  const notifyOnQuestion = values.notifyOnQuestion ?? DEFAULT_CONFIG.notifyOnQuestion;
+  if (typeof notifyOnQuestion !== "boolean") {
+    return { ok: false, error: "notifyOnQuestion must be boolean" };
+  }
 
   return {
     ok: true,
-    config: { minimumRunMs, minimumAwayMs, urgency, expiryMs, showPrompt },
+    config: { minimumRunMs, minimumAwayMs, urgency, expiryMs, showPrompt, notifyOnQuestion },
   };
 }
 
@@ -359,6 +365,18 @@ export function buildNotification(run: EligibleRun, config: NotifyConfig): Notif
   };
 }
 
+export function buildQuestionNotification(question: string, prompt: string, elapsedMs: number, config: NotifyConfig): NotificationContent {
+  const duration = `Duration: ${formatDuration(elapsedMs)}`;
+  const shortQuestion = sanitizePrompt(question);
+  const details = [shortQuestion && `Question: ${shortQuestion}`, `Prompt: ${sanitizePrompt(prompt) || "No prompt"}`, duration].filter(Boolean).join("\n");
+  return {
+    title: "Pi needs your input",
+    body: config.showPrompt ? details : duration,
+    urgency: config.urgency,
+    expiryMs: config.expiryMs,
+  };
+}
+
 type Runtime = {
   now?: () => number;
   writeTerminal?: (data: string) => void;
@@ -398,6 +416,8 @@ export default function heuristicNotify(
   let stopReason: string | undefined;
   let cancelPending: (() => void) | undefined;
   let unsubscribeInput: (() => void) | undefined;
+  let unsubscribeQuestions: (() => void) | undefined;
+  const questions = new Map<string, { question: string; blocked?: boolean; ready?: boolean; cancel?: () => void; notified?: boolean; suppressed?: boolean }>();
 
   const abortDeliveries = () => {
     for (const controller of controllers) controller.abort();
@@ -447,6 +467,62 @@ export default function heuristicNotify(
     agentEnded = false;
     stopReason = undefined;
   };
+  const clearQuestions = () => {
+    for (const question of questions.values()) question.cancel?.();
+    questions.clear();
+  };
+  const scheduleQuestion = (id: string) => {
+    const question = questions.get(id);
+    if (!config?.notifyOnQuestion || !question?.blocked || !question.ready || question.cancel || question.notified || question.suppressed || runStart === undefined) return;
+    const awayMs = continuousAwayMs(focus, now());
+    if (awayMs === undefined) return;
+    question.cancel = schedule(Math.max(config.minimumAwayMs - awayMs, 0), () => {
+      delete question.cancel;
+      if (questions.get(id) !== question || !question.blocked || !question.ready || !config?.notifyOnQuestion || question.suppressed || runStart === undefined) return;
+      const readyAt = now();
+      const currentAwayMs = continuousAwayMs(focus, readyAt);
+      if (currentAwayMs === undefined) return;
+      if (currentAwayMs < config.minimumAwayMs) {
+        scheduleQuestion(id);
+        return;
+      }
+      question.notified = true;
+      void notify(buildQuestionNotification(question.question, prompt, readyAt - runStart, config));
+    });
+  };
+  const listenForQuestions = () => {
+    if (unsubscribeQuestions) return;
+    const stopPrompt = pi.events.on("rpiv:ask-user:prompt", (data) => {
+      const payload = data as { toolCallId?: unknown; questions?: Array<{ question?: unknown }> } | null;
+      if (!payload || typeof payload.toolCallId !== "string" || !payload.toolCallId) return;
+      const question = questions.get(payload.toolCallId) ?? { question: "" };
+      question.question = typeof payload.questions?.[0]?.question === "string" ? payload.questions[0].question : "";
+      questions.set(payload.toolCallId, question);
+    });
+    const stopBlocked = pi.events.on("rpiv:ask-user:blocked", (data) => {
+      const payload = data as { toolCallId?: unknown; active?: unknown } | null;
+      if (!payload || typeof payload.toolCallId !== "string" || !payload.toolCallId) return;
+      if (payload.active === false) {
+        questions.get(payload.toolCallId)?.cancel?.();
+        questions.delete(payload.toolCallId);
+      } else if (payload.active === true) {
+        const question = questions.get(payload.toolCallId) ?? { question: "" };
+        if (question.blocked) return;
+        question.blocked = true;
+        question.suppressed = !focus.observed || focus.focused;
+        questions.set(payload.toolCallId, question);
+      }
+    });
+    const stopReady = pi.events.on("rpiv:ask-user:ready", (data) => {
+      const payload = data as { toolCallId?: unknown } | null;
+      if (!payload || typeof payload.toolCallId !== "string") return;
+      const question = questions.get(payload.toolCallId);
+      if (!question?.blocked) return;
+      question.ready = true;
+      scheduleQuestion(payload.toolCallId);
+    });
+    unsubscribeQuestions = () => { stopPrompt(); stopBlocked(); stopReady(); };
+  };
   pi.registerCommand("notify-check", {
     description: "Show notification state and suppression reason",
     handler: async (_args, ctx) => {
@@ -460,7 +536,7 @@ export default function heuristicNotify(
           ? `Kitty${origin.tmuxPane ? ` + tmux pane ${origin.tmuxPane}` : ""}`
           : (runtime.platform ?? process.platform) === "linux" ? "notify-send" : "unsupported";
       const configText = config
-        ? `run >= ${formatDuration(config.minimumRunMs)}; away >= ${formatDuration(config.minimumAwayMs)}; urgency ${config.urgency}; expiry ${formatDuration(config.expiryMs)}; prompt ${config.showPrompt ? "shown" : "hidden"}`
+        ? `run >= ${formatDuration(config.minimumRunMs)}; away >= ${formatDuration(config.minimumAwayMs)}; urgency ${config.urgency}; expiry ${formatDuration(config.expiryMs)}; prompt ${config.showPrompt ? "shown" : "hidden"}; questions ${config.notifyOnQuestion ? "on" : "off"}`
         : "invalid";
       ctx.ui.notify([
         `Config file: ${configPath()}`,
@@ -506,6 +582,7 @@ export default function heuristicNotify(
   pi.on("session_start", (_event, ctx) => {
     abortDeliveries();
     cancelEligibility();
+    clearQuestions();
     resetRun();
     lastRunDurationMs = undefined;
     Object.assign(focus, createFocusState());
@@ -515,16 +592,23 @@ export default function heuristicNotify(
     config = result.ok ? result.config : undefined;
     suppression = result.ok ? "unknown focus" : "invalid config";
     if (!result.ok) ctx.ui.notify(`pi-heuristic-notify disabled: ${result.error}`, "error");
+    listenForQuestions();
 
     if (ctx.mode !== "tui" || unsubscribeInput) return;
     void resolveNiriOrigin();
     unsubscribeInput = ctx.ui.onTerminalInput((data) => {
       if (data.includes(`${ESC}[I`)) {
         cancelEligibility();
+        for (const question of questions.values()) {
+          question.cancel?.();
+          delete question.cancel;
+          question.suppressed = true;
+        }
         suppression = "focused";
         void resolveNiriOrigin();
       }
       const output = scanFocusInput(data, focus, now());
+      if (data.includes(`${ESC}[O`)) for (const id of questions.keys()) scheduleQuestion(id);
       if (output === undefined) return undefined;
       return output === null ? { consume: true } : { data: output };
     });
@@ -608,6 +692,9 @@ export default function heuristicNotify(
 
   pi.on("session_shutdown", () => {
     cancelEligibility();
+    clearQuestions();
+    unsubscribeQuestions?.();
+    unsubscribeQuestions = undefined;
     abortDeliveries();
     reportError = undefined;
     resetRun();

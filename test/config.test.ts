@@ -32,6 +32,7 @@ test("accepts every JSON configuration property", () => {
       urgency: "critical",
       expirySeconds: 1.25,
       showPrompt: false,
+      notifyOnQuestion: false,
     }),
     {
       ok: true,
@@ -41,6 +42,7 @@ test("accepts every JSON configuration property", () => {
         urgency: "critical",
         expiryMs: 1_250,
         showPrompt: false,
+        notifyOnQuestion: false,
       },
     },
   );
@@ -63,6 +65,7 @@ for (const [property, value] of [
   ["expirySeconds", null],
   ["urgency", "urgent"],
   ["showPrompt", "false"],
+  ["notifyOnQuestion", "false"],
 ] as const) {
   test(`rejects invalid ${property} value ${JSON.stringify(value)}`, () => {
     const result = parseConfig({ [property]: value });
@@ -81,6 +84,13 @@ for (const showPrompt of [true, false]) {
   test(`accepts showPrompt ${showPrompt}`, () => {
     const result = parseConfig({ showPrompt });
     assert.equal(result.ok && result.config.showPrompt, showPrompt);
+  });
+}
+
+for (const notifyOnQuestion of [true, false]) {
+  test(`accepts notifyOnQuestion ${notifyOnQuestion}`, () => {
+    const result = parseConfig({ notifyOnQuestion });
+    assert.equal(result.ok && result.config.notifyOnQuestion, notifyOnQuestion);
   });
 }
 
