@@ -429,6 +429,7 @@ export default function heuristicNotify(
     clearQuestions();
     resetRun();
     lastRunDurationMs = undefined;
+    prompt = "";
     Object.assign(focus, createFocusState());
     reportError = (message) => ctx.ui.notify(`pi-heuristic-notify: ${message}`, "error");
     const result = (runtime.loadConfig ?? loadConfig)();
@@ -457,7 +458,7 @@ export default function heuristicNotify(
   });
 
   pi.on("before_agent_start", (event) => {
-    prompt = event.prompt;
+    if (typeof event.prompt === "string") prompt = event.prompt;
   });
 
   pi.on("agent_start", () => {

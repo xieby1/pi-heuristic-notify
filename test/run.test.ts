@@ -121,6 +121,52 @@ test("the final agent end determines the settled outcome", async () => {
   assert.equal(s.sent[0]?.body, "Prompt: queued follow-up\nDuration: 10s");
 });
 
+test("custom-triggered runs keep the last user prompt", async () => {
+  const s = scenario();
+  await startTui(s);
+  s.harness.sendTerminalInput(FOCUS_OUT);
+  await s.start("human prompt");
+  s.setNow(10_000);
+  await s.end();
+  await s.settle();
+
+  await s.harness.emit("before_agent_start", {
+    type: "before_agent_start",
+    messageType: "custom",
+    message: { role: "custom", content: "automatic follow-up" },
+  });
+  await s.harness.emit("agent_start", { type: "agent_start" });
+  s.setNow(20_000);
+  await s.end();
+  await s.settle();
+
+  assert.equal(s.sent[1]?.body, "Prompt: human prompt\nDuration: 10s");
+});
+
+test("custom runs after a session switch do not reveal the previous prompt", async () => {
+  const s = scenario();
+  await startTui(s);
+  s.harness.sendTerminalInput(FOCUS_OUT);
+  await s.start("private session A");
+  s.setNow(10_000);
+  await s.end();
+  await s.settle();
+
+  await s.harness.emit("session_start", { type: "session_start", reason: "switch" }, { mode: "tui", hasUI: true });
+  s.harness.sendTerminalInput(FOCUS_OUT);
+  await s.harness.emit("before_agent_start", {
+    type: "before_agent_start",
+    messageType: "custom",
+    message: { role: "custom", content: "background work" },
+  });
+  await s.harness.emit("agent_start", { type: "agent_start" });
+  s.setNow(20_000);
+  await s.end();
+  await s.settle();
+
+  assert.equal(s.sent[1]?.body, "Prompt: No prompt\nDuration: 10s");
+});
+
 test("delays until the remaining continuous-away threshold", async () => {
   const s = scenario(10, 5);
   await startTui(s);
