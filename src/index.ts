@@ -292,6 +292,9 @@ export default function heuristicNotify(
   let cancelPending: (() => void) | undefined;
   let unsubscribeInput: (() => void) | undefined;
   let unsubscribeQuestions: (() => void) | undefined;
+  let unsubscribeRetry: (() => void) | undefined;
+  let retryId: number | undefined;
+  let retrySettlement: { at: number; unfocusedSince: number | undefined } | undefined;
   const questions = new Map<string, { question: string; blocked?: boolean; cancel?: () => void; notified?: boolean; suppressed?: boolean }>();
 
   const abortDeliveries = () => {
@@ -327,6 +330,7 @@ export default function heuristicNotify(
     runStart = undefined;
     agentEnded = false;
     stopReason = undefined;
+    retrySettlement = undefined;
   };
   const clearQuestions = () => {
     for (const question of questions.values()) question.cancel?.();
@@ -376,6 +380,39 @@ export default function heuristicNotify(
       }
     });
     unsubscribeQuestions = () => { stopPrompt(); stopBlocked(); };
+  };
+  const cancelRetry = () => {
+    if (retryId === undefined) return;
+    retryId = undefined;
+    cancelEligibility();
+    resetRun();
+    suppression = "retry cancelled";
+  };
+  const listenForRetry = () => {
+    if (unsubscribeRetry) return;
+    const stopStarted = pi.events.on("pi-retry:started", (data) => {
+      const id = (data as { retryId?: unknown } | null)?.retryId;
+      if (typeof id !== "number") return;
+      retryId = id;
+      retrySettlement = undefined;
+      cancelEligibility();
+      suppression = "retry in progress";
+    });
+    const finish = (data: unknown) => {
+      const id = (data as { retryId?: unknown } | null)?.retryId;
+      if (id !== retryId || retryId === undefined) return;
+      retryId = undefined;
+      if (retrySettlement) {
+        const { at, unfocusedSince } = retrySettlement;
+        const awayMs = unfocusedSince !== undefined && focus.unfocusedSince === unfocusedSince
+          ? continuousAwayMs(focus, now())
+          : undefined;
+        settleRun(at, awayMs ?? null);
+      }
+    };
+    const stopCompleted = pi.events.on("pi-retry:completed", finish);
+    const stopCancelled = pi.events.on("pi-retry:cancelled", finish);
+    unsubscribeRetry = () => { stopStarted(); stopCompleted(); stopCancelled(); };
   };
   pi.registerCommand("notify-check", {
     description: "Show notification state and suppression reason",
@@ -428,6 +465,7 @@ export default function heuristicNotify(
     cancelEligibility();
     clearQuestions();
     resetRun();
+    retryId = undefined;
     lastRunDurationMs = undefined;
     prompt = "";
     Object.assign(focus, createFocusState());
@@ -437,9 +475,11 @@ export default function heuristicNotify(
     suppression = result.ok ? "unknown focus" : "invalid config";
     if (!result.ok) ctx.ui.notify(`pi-heuristic-notify disabled: ${result.error}`, "error");
     listenForQuestions();
+    listenForRetry();
 
     if (ctx.mode !== "tui" || unsubscribeInput) return;
     unsubscribeInput = ctx.ui.onTerminalInput((data) => {
+      if (data === ESC) cancelRetry();
       if (data.includes(`${ESC}[I`)) {
         cancelEligibility();
         for (const question of questions.values()) {
@@ -457,6 +497,8 @@ export default function heuristicNotify(
     write(ENABLE_FOCUS_REPORTING);
   });
 
+  pi.on("input", () => cancelRetry());
+
   pi.on("before_agent_start", (event) => {
     if (typeof event.prompt === "string") prompt = event.prompt;
   });
@@ -467,15 +509,17 @@ export default function heuristicNotify(
     suppression = "run in progress";
     agentEnded = false;
     stopReason = undefined;
+    retrySettlement = undefined;
   });
 
-  pi.on("agent_end", (event) => {
+  pi.on("agent_end", (event, ctx) => {
     agentEnded = true;
-    stopReason = [...event.messages].reverse().find((message) => message.role === "assistant")?.stopReason;
+    stopReason = ctx.signal?.aborted
+      ? "aborted"
+      : [...event.messages].reverse().find((message) => message.role === "assistant")?.stopReason;
   });
 
-  pi.on("agent_settled", () => {
-    const settledAt = now();
+  const settleRun = (settledAt = now(), awayMs: number | null | undefined = continuousAwayMs(focus, settledAt)) => {
     const startedAt = runStart;
     const ended = agentEnded;
     const finalStopReason = stopReason;
@@ -501,8 +545,7 @@ export default function heuristicNotify(
       suppression = "short run";
       return;
     }
-    const awayMs = continuousAwayMs(focus, settledAt);
-    if (awayMs === undefined) {
+    if (awayMs == null) {
       suppression = focus.observed ? "focused" : "unknown focus";
       return;
     }
@@ -530,6 +573,15 @@ export default function heuristicNotify(
         deliver();
       }
     });
+  };
+
+  pi.on("agent_settled", () => {
+    if (retryId === undefined) settleRun();
+    else {
+      const at = now();
+      retrySettlement = { at, unfocusedSince: continuousAwayMs(focus, at) === undefined ? undefined : focus.unfocusedSince };
+      suppression = "retry in progress";
+    }
   });
 
   pi.on("session_shutdown", () => {
@@ -537,6 +589,9 @@ export default function heuristicNotify(
     clearQuestions();
     unsubscribeQuestions?.();
     unsubscribeQuestions = undefined;
+    unsubscribeRetry?.();
+    unsubscribeRetry = undefined;
+    retryId = undefined;
     abortDeliveries();
     reportError = undefined;
     resetRun();

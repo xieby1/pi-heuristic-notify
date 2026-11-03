@@ -48,6 +48,14 @@ function scenario(minimumRunSeconds = 10, minimumAwaySeconds = 5) {
       });
       await harness.emit("agent_start", { type: "agent_start" });
     },
+    async retry() {
+      await harness.emit("before_agent_start", {
+        type: "before_agent_start",
+        messageType: "custom",
+        message: { role: "custom", content: "Retry the previous request." },
+      });
+      await harness.emit("agent_start", { type: "agent_start" });
+    },
     async end(stopReason = "stop") {
       await harness.emit("agent_end", {
         type: "agent_end",
@@ -253,4 +261,187 @@ test("each settled run emits at most once and resets state", async () => {
   await s.settle();
   assert.equal(s.sent.length, 1);
   assert.equal(s.sent[0]?.body, "Prompt: one\nDuration: 10s");
+});
+
+test("pi-retry hides failed attempts and notifies once after recovery", async () => {
+  const s = scenario();
+  await startTui(s);
+  s.harness.sendTerminalInput(FOCUS_OUT);
+  await s.start("original prompt");
+  s.setNow(10_000);
+  await s.end("error");
+  s.harness.emitEvent("pi-retry:started", { retryId: 1 });
+  await s.settle();
+  assert.equal(s.sent.length, 0);
+  assert.equal(s.timerAt, undefined);
+
+  await s.retry();
+  s.setNow(20_000);
+  await s.end("error");
+  await s.settle();
+  assert.equal(s.sent.length, 0);
+
+  await s.retry();
+  s.setNow(30_000);
+  await s.end();
+  await s.settle();
+  assert.equal(s.sent.length, 0);
+  s.harness.emitEvent("pi-retry:completed", { retryId: 2 });
+  assert.equal(s.sent.length, 0);
+  s.harness.emitEvent("pi-retry:completed", { retryId: 1 });
+  assert.deepEqual(s.sent, [{
+    title: "Pi run complete",
+    body: "Prompt: original prompt\nDuration: 30s",
+    urgency: "normal",
+    expiryMs: 10_000,
+  }]);
+});
+
+test("pi-retry gives up after retries and notifies only the terminal error", async () => {
+  const s = scenario();
+  await startTui(s);
+  s.harness.sendTerminalInput(FOCUS_OUT);
+  await s.start("original prompt");
+  s.setNow(10_000);
+  await s.end("error");
+  s.harness.emitEvent("pi-retry:started", { retryId: 1 });
+  await s.settle();
+  assert.equal(s.sent.length, 0);
+
+  await s.retry();
+  s.setNow(20_000);
+  await s.end("error");
+  await s.settle();
+  assert.equal(s.sent.length, 0);
+  s.harness.emitEvent("pi-retry:cancelled", { retryId: 1 });
+  assert.equal(s.sent[0]?.title, "Pi run failed");
+  assert.equal(s.sent[0]?.body, "Prompt: original prompt\nDuration: 20s");
+});
+
+test("retry completion before final agent_settled waits for settlement", async () => {
+  const s = scenario();
+  await startTui(s);
+  s.harness.sendTerminalInput(FOCUS_OUT);
+  await s.start();
+  s.setNow(10_000);
+  await s.end("error");
+  s.harness.emitEvent("pi-retry:started", { retryId: 1 });
+  await s.settle();
+  await s.retry();
+  s.setNow(20_000);
+  await s.end();
+  s.harness.emitEvent("pi-retry:completed", { retryId: 1 });
+  assert.equal(s.sent.length, 0);
+  await s.settle();
+  await s.settle();
+  assert.equal(s.sent.length, 1);
+  assert.equal(s.sent[0]?.body, "Prompt: latest prompt\nDuration: 20s");
+});
+
+test("retry outcome uses final settlement time, not later lifecycle timing", async () => {
+  const s = scenario();
+  await startTui(s);
+  s.harness.sendTerminalInput(FOCUS_OUT);
+  await s.start();
+  s.setNow(10_000);
+  await s.end("error");
+  s.harness.emitEvent("pi-retry:started", { retryId: 1 });
+  await s.settle();
+  await s.retry();
+  s.setNow(20_000);
+  await s.end();
+  await s.settle();
+  s.setNow(25_000);
+  s.harness.emitEvent("pi-retry:completed", { retryId: 1 });
+  assert.equal(s.sent[0]?.body, "Prompt: latest prompt\nDuration: 20s");
+});
+
+test("retry recovery watched at settlement stays silent if unfocused later", async () => {
+  const s = scenario();
+  await startTui(s);
+  s.harness.sendTerminalInput(FOCUS_OUT);
+  await s.start();
+  s.setNow(10_000);
+  await s.end("error");
+  s.harness.emitEvent("pi-retry:started", { retryId: 1 });
+  await s.settle();
+  await s.retry();
+  s.harness.sendTerminalInput(FOCUS_IN);
+  s.setNow(20_000);
+  await s.end();
+  await s.settle();
+  s.harness.sendTerminalInput(FOCUS_OUT);
+  s.setNow(30_000);
+  s.harness.emitEvent("pi-retry:completed", { retryId: 1 });
+  assert.equal(s.sent.length, 0);
+  assert.equal(s.timerAt, undefined);
+});
+
+test("new user input cancels an old retry without suppressing the next run", async () => {
+  const s = scenario();
+  await startTui(s);
+  s.harness.sendTerminalInput(FOCUS_OUT);
+  await s.start("old prompt");
+  s.setNow(10_000);
+  await s.end("error");
+  s.harness.emitEvent("pi-retry:started", { retryId: 1 });
+  await s.settle();
+
+  s.setNow(12_000);
+  await s.harness.emit("input", { type: "input" });
+  s.harness.emitEvent("pi-retry:cancelled", { retryId: 1 });
+  assert.equal(s.sent.length, 0);
+  await s.start("new prompt");
+  s.setNow(22_000);
+  await s.end();
+  await s.settle();
+  assert.equal(s.sent.length, 1);
+  assert.equal(s.sent[0]?.body, "Prompt: new prompt\nDuration: 10s");
+});
+
+test("an aborted retry with an error-shaped response stays silent", async () => {
+  const s = scenario();
+  await startTui(s);
+  s.harness.sendTerminalInput(FOCUS_OUT);
+  await s.start();
+  s.setNow(10_000);
+  await s.end("error");
+  s.harness.emitEvent("pi-retry:started", { retryId: 1 });
+  await s.settle();
+  await s.retry();
+  const abort = new AbortController();
+  abort.abort();
+  s.setNow(20_000);
+  await s.harness.emit("agent_end", {
+    type: "agent_end",
+    messages: [{ role: "assistant", stopReason: "error" }],
+  }, { signal: abort.signal });
+  s.harness.emitEvent("pi-retry:cancelled", { retryId: 1 });
+  await s.settle();
+  assert.equal(s.sent.length, 0);
+});
+
+test("retry listeners are removed on shutdown and restored on session start", async () => {
+  const s = scenario();
+  await startTui(s);
+  assert.equal(s.harness.eventListenerCount("pi-retry:started"), 1);
+  await s.harness.emit("session_shutdown", { type: "session_shutdown", reason: "reload" });
+  assert.equal(s.harness.eventListenerCount("pi-retry:started"), 0);
+  assert.equal(s.harness.eventListenerCount("pi-retry:completed"), 0);
+  await startTui(s);
+  assert.equal(s.harness.eventListenerCount("pi-retry:started"), 1);
+});
+
+test("cancelling pi-retry with Escape does not notify the earlier error", async () => {
+  const s = scenario();
+  await startTui(s);
+  s.harness.sendTerminalInput(FOCUS_OUT);
+  await s.start();
+  s.setNow(10_000);
+  await s.end("error");
+  s.harness.emitEvent("pi-retry:started", { retryId: 1 });
+  await s.settle();
+  s.harness.sendTerminalInput("\x1b");
+  s.harness.emitEvent("pi-retry:cancelled", { retryId: 1 });
+  assert.equal(s.sent.length, 0);
 });
