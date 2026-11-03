@@ -1,8 +1,10 @@
 # pi-heuristic-notify
 
+Development and live testing moved to `xieby1/nix_config/usr/cli/basic/pi/extensions/heuristic-notify/`. Keep this checkout for history and fixes needed by pinned revisions. The `rpiv-ask-user-question` and `pi-retry` integrations are still in use; preserve them.
+
 ## Requirements
 
-Build a customizable Pi desktop-notification extension with these behaviors:
+For pinned-revision fixes, preserve these behaviors:
 
 - Notify on completed runs only after Pi fully settles and both configurable heuristic thresholds hold:
 
@@ -39,7 +41,7 @@ Its work gate is `duration >= 10s OR tool calls OR errors`. It checks current fo
 
 #### [cjrh/desktop-notify-kitty](https://github.com/cjrh/desktop-notify-kitty)
 
-Strong fit for the current Kitty/Linux environment. Uses Kitty remote control plus DECSET 1004 focus tracking, `kitten notify` for click-to-focus, and `notify-send` as fallback. Missing run-duration and unfocused-duration thresholds; hooks `agent_end`.
+A Kitty/Linux reference implementation. Uses Kitty remote control plus DECSET 1004 focus tracking, `kitten notify` for click-to-focus, and `notify-send` as fallback. Missing run-duration and unfocused-duration thresholds; hooks `agent_end`.
 
 ### Conclusion
 
@@ -49,7 +51,7 @@ No surveyed public extension implements both minimum run duration and minimum co
 
 - Use Node's built-in `node:test` and `node:assert`; keep Pi, TypeScript, and Node types in `devDependencies` only.
 - Invoke the default extension factory with a minimal fake `ExtensionAPI`. Capture callbacks passed to `pi.on()`, then call them with controlled events and context objects.
-- Keep heuristic decisions in pure exported functions and test exact threshold boundaries, focus resets, aborted/trivial runs, and notification formatting.
+- Test event-driven heuristic decisions through the fake `ExtensionAPI`; extract pure helpers only when they simplify the code, and export them only when needed. Cover exact threshold boundaries, focus resets, aborted/trivial runs, and notification formatting.
 - Inject a clock such as `now: () => number`; never use real sleeps in unit tests.
 - Test completion through `agent_settled`, not `agent_end`, so retries and queued follow-ups are excluded.
-- Use one `DefaultResourceLoader` smoke test to verify the TypeScript entrypoint loads. Test real Kitty/tmux focus and desktop notification behavior manually through `/notify-check` or `pi -e`.
+- Use one `DefaultResourceLoader` smoke test to verify the TypeScript entrypoint loads. In the maintained checkout, manually test Ghostty exact-origin activation and Linux fallback with `/notify-test` and `/notify-check`; test Kitty/tmux only if support is added.
