@@ -318,7 +318,7 @@ test("pi-retry gives up after retries and notifies only the terminal error", asy
   assert.equal(s.sent[0]?.body, "Prompt: original prompt\nDuration: 20s");
 });
 
-test("retry completion before final agent_settled waits for settlement", async () => {
+test("retry completion before final retry starts waits for settlement", async () => {
   const s = scenario();
   await startTui(s);
   s.harness.sendTerminalInput(FOCUS_OUT);
@@ -327,12 +327,11 @@ test("retry completion before final agent_settled waits for settlement", async (
   await s.end("error");
   s.harness.emitEvent("pi-retry:started", { retryId: 1 });
   await s.settle();
+  s.harness.emitEvent("pi-retry:completed", { retryId: 1 });
+  assert.equal(s.sent.length, 0);
   await s.retry();
   s.setNow(20_000);
   await s.end();
-  s.harness.emitEvent("pi-retry:completed", { retryId: 1 });
-  assert.equal(s.sent.length, 0);
-  await s.settle();
   await s.settle();
   assert.equal(s.sent.length, 1);
   assert.equal(s.sent[0]?.body, "Prompt: latest prompt\nDuration: 20s");

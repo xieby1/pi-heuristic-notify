@@ -294,7 +294,8 @@ export default function heuristicNotify(
   let unsubscribeQuestions: (() => void) | undefined;
   let unsubscribeRetry: (() => void) | undefined;
   let retryId: number | undefined;
-  let retrySettlement: { at: number; unfocusedSince: number | undefined } | undefined;
+  let retryCompleted = false;
+  let retrySettlement: { at: number; unfocusedSince: number | undefined; stopReason: string | undefined } | undefined;
   const questions = new Map<string, { question: string; blocked?: boolean; cancel?: () => void; notified?: boolean; suppressed?: boolean }>();
 
   const abortDeliveries = () => {
@@ -330,6 +331,7 @@ export default function heuristicNotify(
     runStart = undefined;
     agentEnded = false;
     stopReason = undefined;
+    retryCompleted = false;
     retrySettlement = undefined;
   };
   const clearQuestions = () => {
@@ -394,24 +396,31 @@ export default function heuristicNotify(
       const id = (data as { retryId?: unknown } | null)?.retryId;
       if (typeof id !== "number") return;
       retryId = id;
+      retryCompleted = false;
       retrySettlement = undefined;
       cancelEligibility();
       suppression = "retry in progress";
     });
-    const finish = (data: unknown) => {
+    const finish = (data: unknown, completed: boolean) => {
       const id = (data as { retryId?: unknown } | null)?.retryId;
       if (id !== retryId || retryId === undefined) return;
-      retryId = undefined;
+      if (completed) {
+        retryCompleted = true;
+        if (!retrySettlement || retrySettlement.stopReason === "error") return;
+      }
       if (retrySettlement) {
         const { at, unfocusedSince } = retrySettlement;
         const awayMs = unfocusedSince !== undefined && focus.unfocusedSince === unfocusedSince
           ? continuousAwayMs(focus, now())
           : undefined;
+        retryId = undefined;
         settleRun(at, awayMs ?? null);
+      } else {
+        retryId = undefined;
       }
     };
-    const stopCompleted = pi.events.on("pi-retry:completed", finish);
-    const stopCancelled = pi.events.on("pi-retry:cancelled", finish);
+    const stopCompleted = pi.events.on("pi-retry:completed", (data) => finish(data, true));
+    const stopCancelled = pi.events.on("pi-retry:cancelled", (data) => finish(data, false));
     unsubscribeRetry = () => { stopStarted(); stopCompleted(); stopCancelled(); };
   };
   pi.registerCommand("notify-check", {
@@ -579,8 +588,20 @@ export default function heuristicNotify(
     if (retryId === undefined) settleRun();
     else {
       const at = now();
-      retrySettlement = { at, unfocusedSince: continuousAwayMs(focus, at) === undefined ? undefined : focus.unfocusedSince };
+      retrySettlement = {
+        at,
+        unfocusedSince: continuousAwayMs(focus, at) === undefined ? undefined : focus.unfocusedSince,
+        stopReason,
+      };
       suppression = "retry in progress";
+      if (retryCompleted && retrySettlement.stopReason !== "error") {
+        const { at: settledAt, unfocusedSince } = retrySettlement;
+        const awayMs = unfocusedSince !== undefined && focus.unfocusedSince === unfocusedSince
+          ? continuousAwayMs(focus, now())
+          : undefined;
+        retryId = undefined;
+        settleRun(settledAt, awayMs ?? null);
+      }
     }
   });
 
@@ -592,6 +613,7 @@ export default function heuristicNotify(
     unsubscribeRetry?.();
     unsubscribeRetry = undefined;
     retryId = undefined;
+    retryCompleted = false;
     abortDeliveries();
     reportError = undefined;
     resetRun();
